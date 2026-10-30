@@ -9,9 +9,7 @@ class RiffShelfApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return const MaterialApp(
       title: 'RiffShelf',
-      home: Scaffold(
-        body: Center(child: Text('Welcome to RiffShelf')),
-      ),
+      home: Scaffold(body: Center(child: Text('Welcome to RiffShelf'))),
     );
   }
 }
