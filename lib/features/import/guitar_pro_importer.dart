@@ -101,11 +101,12 @@ class GuitarProImporter {
         beats: beats,
       );
     }).toList();
-    final instrument =
-        (track.channel.instrument >= 32 && track.channel.instrument <= 39) ||
-            tuning.length == 4
+    final program = track.channel.instrument;
+    final instrument = program >= 32 && program <= 39
         ? InstrumentType.bass
-        : InstrumentType.guitar;
+        : program >= 24 && program <= 31
+        ? InstrumentType.guitar
+        : InstrumentType.other;
     return SavedTab(
       title: song.title.isEmpty ? track.name : song.title,
       artist: song.artist,

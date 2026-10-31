@@ -15,6 +15,7 @@ class SavedTab {
     required this.source,
     required this.sourceUrl,
     this.sourceId,
+    this.importKey,
     this.tabType = TabType.tab,
     this.trackName,
     required this.instrument,
@@ -38,6 +39,9 @@ class SavedTab {
   final String source;
   final String sourceUrl;
   final String? sourceId;
+
+  /// Stable identity of the imported file and selected track, when available.
+  final String? importKey;
   final TabType tabType;
   final String? trackName;
   final InstrumentType instrument;
@@ -64,29 +68,34 @@ class SavedTab {
   bool get hasTextContent => asciiTab.trim().isNotEmpty;
   bool get hasUsableContent => hasStructuredContent || hasTextContent;
 
-  SavedTab copyWith({int? id, List<String>? tags, bool? isFavorite}) =>
-      SavedTab(
-        id: id ?? this.id,
-        title: title,
-        artist: artist,
-        source: source,
-        sourceUrl: sourceUrl,
-        sourceId: sourceId,
-        tabType: tabType,
-        trackName: trackName,
-        instrument: instrument,
-        stringCount: stringCount,
-        tuning: tuning,
-        capo: capo,
-        bpm: bpm,
-        tags: tags ?? this.tags,
-        asciiTab: asciiTab,
-        measures: measures,
-        sourceData: sourceData,
-        classification: classification,
-        isFavorite: isFavorite ?? this.isFavorite,
-        albumArt: albumArt,
-      );
+  SavedTab copyWith({
+    int? id,
+    List<String>? tags,
+    bool? isFavorite,
+    String? importKey,
+  }) => SavedTab(
+    id: id ?? this.id,
+    title: title,
+    artist: artist,
+    source: source,
+    sourceUrl: sourceUrl,
+    sourceId: sourceId,
+    importKey: importKey ?? this.importKey,
+    tabType: tabType,
+    trackName: trackName,
+    instrument: instrument,
+    stringCount: stringCount,
+    tuning: tuning,
+    capo: capo,
+    bpm: bpm,
+    tags: tags ?? this.tags,
+    asciiTab: asciiTab,
+    measures: measures,
+    sourceData: sourceData,
+    classification: classification,
+    isFavorite: isFavorite ?? this.isFavorite,
+    albumArt: albumArt,
+  );
 
   SavedTab copyWithSourceData(String? value) => SavedTab(
     id: id,
@@ -95,6 +104,7 @@ class SavedTab {
     source: source,
     sourceUrl: sourceUrl,
     sourceId: sourceId,
+    importKey: importKey,
     tabType: tabType,
     trackName: trackName,
     instrument: instrument,
@@ -118,6 +128,7 @@ class SavedTab {
     source: source,
     sourceUrl: sourceUrl,
     sourceId: sourceId ?? existing.sourceId,
+    importKey: importKey ?? existing.importKey,
     tabType: tabType,
     trackName: trackName,
     instrument: instrument,
@@ -143,6 +154,7 @@ class SavedTab {
     required int? bpm,
     required List<String> tags,
     required String? trackName,
+    InstrumentClassification? classification,
   }) => SavedTab(
     id: id,
     title: title,
@@ -150,6 +162,7 @@ class SavedTab {
     source: source,
     sourceUrl: sourceUrl,
     sourceId: sourceId,
+    importKey: importKey,
     tabType: tabType,
     trackName: trackName,
     instrument: instrument,
@@ -161,7 +174,7 @@ class SavedTab {
     asciiTab: asciiTab,
     measures: measures,
     sourceData: sourceData,
-    classification: classification,
+    classification: classification ?? this.classification,
     isFavorite: isFavorite,
     albumArt: albumArt,
   );
@@ -173,6 +186,7 @@ class SavedTab {
     'source': source,
     'source_url': sourceUrl,
     'source_id': sourceId,
+    'import_key': importKey,
     'tab_type': tabType.name,
     'track_name': trackName,
     'instrument': instrument.name,
@@ -201,6 +215,7 @@ class SavedTab {
       source: map['source']! as String,
       sourceUrl: map['source_url']! as String,
       sourceId: map['source_id'] as String?,
+      importKey: map['import_key'] as String?,
       tabType: TabType.fromValue(map['tab_type'] as String?),
       trackName: map['track_name'] as String?,
       instrument: InstrumentType.fromJson(map['instrument']! as String),

@@ -1,5 +1,4 @@
 import '../../core/models/instrument_type.dart';
-import '../../core/models/tuning.dart';
 
 class AsciiTabInference {
   const AsciiTabInference({
@@ -45,30 +44,28 @@ abstract final class AsciiTabParser {
       }
     }
     if (notes.length == 4) {
-      final tuning = notes.every((note) => note.isNotEmpty)
-          ? notes.reversed.toList()
-          : StandardTunings.bassStandard.notes;
+      final tuning = notes.reversed
+          .map((note) => note.isEmpty ? '?' : note)
+          .toList();
       return AsciiTabInference(
-        instrument: InstrumentType.bass,
+        instrument: InstrumentType.other,
         tuning: tuning,
         type: TabType.bass,
       );
     }
     if (notes.length >= 2) {
-      final tuning = notes.every((note) => note.isNotEmpty)
-          ? notes.reversed.toList()
-          : notes.length == 6
-          ? StandardTunings.guitarStandard.notes
-          : List.filled(notes.length, '?');
+      final tuning = notes.reversed
+          .map((note) => note.isEmpty ? '?' : note)
+          .toList();
       return AsciiTabInference(
-        instrument: InstrumentType.guitar,
+        instrument: InstrumentType.other,
         tuning: tuning,
         type: TabType.tab,
       );
     }
     return AsciiTabInference(
-      instrument: InstrumentType.guitar,
-      tuning: StandardTunings.guitarStandard.notes,
+      instrument: InstrumentType.other,
+      tuning: const ['?', '?', '?', '?', '?', '?'],
       type: TabType.chords,
     );
   }

@@ -15,15 +15,18 @@ class SqliteTabRepository implements TabRepository {
   final DatabaseFactory _databaseFactory;
   final String? _databasePath;
   Database? _database;
+  Future<Database>? _opening;
 
-  Future<Database> get _db async {
+  Future<Database> get _db => _opening ??= _open();
+
+  Future<Database> _open() async {
     final path =
         _databasePath ??
         p.join(await _databaseFactory.getDatabasesPath(), 'riffshelf.db');
     return _database ??= await _databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 2,
+        version: 3,
         onCreate: (db, version) async {
           await db.execute('''
           CREATE TABLE saved_tabs (
@@ -33,6 +36,7 @@ class SqliteTabRepository implements TabRepository {
             source TEXT NOT NULL,
             source_url TEXT NOT NULL,
             source_id TEXT,
+            import_key TEXT,
             tab_type TEXT NOT NULL DEFAULT 'tab',
             track_name TEXT,
             instrument TEXT NOT NULL,
@@ -56,6 +60,9 @@ class SqliteTabRepository implements TabRepository {
           await db.execute(
             'CREATE INDEX saved_tabs_artist ON saved_tabs(artist)',
           );
+          await db.execute(
+            'CREATE UNIQUE INDEX saved_tabs_import_key ON saved_tabs(import_key)',
+          );
         },
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
@@ -67,6 +74,14 @@ class SqliteTabRepository implements TabRepository {
             );
             await db.execute(
               'ALTER TABLE saved_tabs ADD COLUMN album_art TEXT',
+            );
+          }
+          if (oldVersion < 3) {
+            await db.execute(
+              'ALTER TABLE saved_tabs ADD COLUMN import_key TEXT',
+            );
+            await db.execute(
+              'CREATE UNIQUE INDEX saved_tabs_import_key ON saved_tabs(import_key)',
             );
           }
         },
@@ -94,6 +109,14 @@ class SqliteTabRepository implements TabRepository {
       clauses.add('instrument = ?');
       arguments.add(filter.instrument!.name);
     }
+    if (filter.classification != null) {
+      clauses.add('classification = ?');
+      arguments.add(filter.classification!.name);
+    }
+    if (filter.stringCount != null) {
+      clauses.add('string_count = ?');
+      arguments.add(filter.stringCount!);
+    }
     if (filter.tuning != null) {
       clauses.add('tuning_key = ?');
       arguments.add(StandardTunings.keyFor(filter.tuning!));
@@ -106,7 +129,10 @@ class SqliteTabRepository implements TabRepository {
     );
     final tabs = rows.map(SavedTab.fromDatabaseMap).toList();
     if (filter.tags.isEmpty) return tabs;
-    return tabs.where((tab) => filter.tags.every(tab.tags.contains)).toList();
+    return tabs.where((tab) {
+      final normalized = tab.tags.map((tag) => tag.toLowerCase()).toSet();
+      return filter.tags.every((tag) => normalized.contains(tag.toLowerCase()));
+    }).toList();
   }
 
   @override
@@ -135,8 +161,15 @@ class SqliteTabRepository implements TabRepository {
       if (count == 0) throw StateError('Tab does not exist: ${tab.id}');
       return tab;
     }
-    final id = await db.insert('saved_tabs', tab.toDatabaseMap());
-    return tab.copyWith(id: id);
+    try {
+      final id = await db.insert('saved_tabs', tab.toDatabaseMap());
+      return tab.copyWith(id: id);
+    } on DatabaseException catch (error) {
+      if (tab.importKey != null && error.isUniqueConstraintError()) {
+        throw const DuplicateTabException();
+      }
+      rethrow;
+    }
   }
 
   @override
@@ -157,7 +190,9 @@ class SqliteTabRepository implements TabRepository {
 
   @override
   Future<void> close() async {
+    if (_opening != null) await _opening;
     await _database?.close();
     _database = null;
+    _opening = null;
   }
 }

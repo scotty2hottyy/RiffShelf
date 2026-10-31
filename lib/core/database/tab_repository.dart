@@ -5,15 +5,23 @@ class TabFilter {
   const TabFilter({
     this.query = '',
     this.instrument,
+    this.classification,
+    this.stringCount,
     this.tuning,
     this.tags = const {},
     this.favoritesOnly = false,
   });
   final String query;
   final InstrumentType? instrument;
+  final InstrumentClassification? classification;
+  final int? stringCount;
   final List<String>? tuning;
   final Set<String> tags;
   final bool favoritesOnly;
+}
+
+class DuplicateTabException implements Exception {
+  const DuplicateTabException();
 }
 
 abstract interface class TabRepository {

@@ -1,12 +1,17 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
+
 import '../../core/models/saved_tab.dart';
 import 'ascii_tab_parser.dart';
 import 'guitar_pro_importer.dart';
 
 class TabImportService {
   const TabImportService();
+
+  String importKey(Uint8List bytes, int trackIndex) =>
+      'sha256:${sha256.convert(bytes)}:track:$trackIndex';
 
   bool supportsExtension(String? extension) => const [
     'txt',

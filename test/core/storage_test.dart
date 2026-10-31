@@ -139,6 +139,7 @@ void main() {
             '''CREATE TABLE saved_tabs (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, artist TEXT NOT NULL, source TEXT NOT NULL, source_url TEXT NOT NULL, source_id TEXT, tab_type TEXT NOT NULL, track_name TEXT, instrument TEXT NOT NULL, string_count INTEGER NOT NULL, tuning TEXT NOT NULL, tuning_key TEXT NOT NULL, capo INTEGER NOT NULL, bpm INTEGER, tags TEXT NOT NULL, ascii_tab TEXT NOT NULL, structure TEXT NOT NULL, source_data TEXT)''',
           );
           final data = example().toDatabaseMap()
+            ..remove('import_key')
             ..remove('classification')
             ..remove('is_favorite')
             ..remove('album_art');

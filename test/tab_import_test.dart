@@ -9,10 +9,30 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
   const importer = TabImportService();
+  test('import identity includes file content and selected track', () {
+    final bytes = Uint8List.fromList([1, 2, 3]);
+    expect(
+      importer.importKey(bytes, 0),
+      importer.importKey(Uint8List.fromList([1, 2, 3]), 0),
+    );
+    expect(importer.importKey(bytes, 0), isNot(importer.importKey(bytes, 1)));
+    expect(
+      importer.importKey(bytes, 0),
+      isNot(importer.importKey(Uint8List.fromList([1, 2, 4]), 0)),
+    );
+  });
   test('rejects unsupported extensions', () {
     expect(importer.supportsExtension('pdf'), isFalse);
     expect(importer.supportsExtension(null), isFalse);
     expect(importer.supportsExtension('GP5'), isTrue);
+  });
+  test('unlabeled text keeps instrument and tuning unknown', () {
+    final tab = importer.parseText(
+      Uint8List.fromList(utf8.encode('|--1--|\n|-----|\n|-----|\n|-----|')),
+      'unknown.txt',
+    );
+    expect(tab.instrument.name, 'other');
+    expect(tab.tuning, ['?', '?', '?', '?']);
   });
   for (final extension in ['gp3', 'gp4', 'gp5']) {
     test('imports $extension sample with playable notes', () {
