@@ -67,7 +67,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.repository == null) {
+      SqliteTabRepository.changes.addListener(refresh);
+    }
+  }
+
+  @override
   void dispose() {
+    if (widget.repository == null) {
+      SqliteTabRepository.changes.removeListener(refresh);
+    }
     search.dispose();
     filterCount.dispose();
     filterTuning.dispose();

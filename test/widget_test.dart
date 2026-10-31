@@ -14,7 +14,7 @@ void main() {
     await tester.pumpWidget(const RiffShelfApp());
 
     expect(find.text('Discover'), findsWidgets);
-    expect(find.text('Find guitar and bass tabs to play.'), findsOneWidget);
+    expect(find.text('Song or artist'), findsOneWidget);
     expect(find.text('Practice'), findsWidgets);
     expect(find.text('Tuner'), findsWidgets);
     expect(find.text('Library'), findsWidgets);
@@ -42,19 +42,15 @@ void main() {
   testWidgets('keeps pages mounted when switching tabs', (tester) async {
     await tester.pumpWidget(const RiffShelfApp());
 
-    final indexedStack = tester.widget<IndexedStack>(find.byType(IndexedStack));
-    expect(indexedStack.children, hasLength(5));
-    expect(
-      find.text('Find guitar and bass tabs to play.', skipOffstage: false),
-      findsOneWidget,
+    final indexedStack = tester.widget<IndexedStack>(
+      find.byType(IndexedStack).first,
     );
+    expect(indexedStack.children, hasLength(5));
+    expect(find.text('Song or artist', skipOffstage: false), findsOneWidget);
 
     await tester.tap(find.text('Library').last);
     await tester.pumpAndSettle();
     expect(find.text('Import Tab'), findsOneWidget);
-    expect(
-      find.text('Find guitar and bass tabs to play.', skipOffstage: false),
-      findsOneWidget,
-    );
+    expect(find.text('Song or artist', skipOffstage: false), findsOneWidget);
   });
 }

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
@@ -9,6 +10,8 @@ import 'tab_repository.dart';
 
 class SqliteTabRepository implements TabRepository {
   SqliteTabRepository(this._databaseFactory, [this._databasePath]);
+
+  static final ValueNotifier<int> changes = ValueNotifier(0);
 
   factory SqliteTabRepository.local() => SqliteTabRepository(databaseFactory);
 
@@ -163,6 +166,7 @@ class SqliteTabRepository implements TabRepository {
     }
     try {
       final id = await db.insert('saved_tabs', tab.toDatabaseMap());
+      changes.value++;
       return tab.copyWith(id: id);
     } on DatabaseException catch (error) {
       if (tab.importKey != null && error.isUniqueConstraintError()) {
