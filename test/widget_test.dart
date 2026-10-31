@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:riffshelf/app.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
+  setUpAll(() {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  });
   testWidgets('shows all navigation destinations and the initial screen', (
     tester,
   ) async {
@@ -46,10 +51,7 @@ void main() {
 
     await tester.tap(find.text('Library').last);
     await tester.pumpAndSettle();
-    expect(
-      find.text('Your saved tabs will be available here.'),
-      findsOneWidget,
-    );
+    expect(find.text('Import Tab'), findsOneWidget);
     expect(
       find.text('Find guitar and bass tabs to play.', skipOffstage: false),
       findsOneWidget,
