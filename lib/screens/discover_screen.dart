@@ -138,6 +138,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
               children: [
                 Expanded(
                   child: DropdownButtonFormField<InstrumentType?>(
+                    isExpanded: true,
                     initialValue: instrument,
                     decoration: const InputDecoration(labelText: 'Instrument'),
                     items: const [

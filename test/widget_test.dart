@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:riffshelf/app.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -53,4 +54,39 @@ void main() {
     expect(find.text('Import Tab'), findsOneWidget);
     expect(find.text('Song or artist', skipOffstage: false), findsOneWidget);
   });
+
+  for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
+    testWidgets('all destinations fit a small $platform screen', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = platform;
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.padding = const FakeViewPadding(top: 24, bottom: 20);
+      addTearDown(() {
+        debugDefaultTargetPlatformOverride = null;
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPadding();
+      });
+
+      await tester.pumpWidget(const RiffShelfApp());
+      for (final destination in [
+        'Practice',
+        'Tuner',
+        'Library',
+        'Settings',
+        'Discover',
+      ]) {
+        await tester.tap(find.text(destination).last);
+        await tester.pumpAndSettle();
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: '$destination on $platform',
+        );
+      }
+      debugDefaultTargetPlatformOverride = null;
+    });
+  }
 }

@@ -119,34 +119,38 @@ class _BrandHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 11),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text.rich(
-              TextSpan(
-                children: [
-                  const TextSpan(text: 'Riff'),
-                  TextSpan(
-                    text: 'Shelf',
-                    style: TextStyle(color: theme.colorScheme.primary),
-                  ),
-                ],
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text.rich(
+                TextSpan(
+                  children: [
+                    const TextSpan(text: 'Riff'),
+                    TextSpan(
+                      text: 'Shelf',
+                      style: TextStyle(color: theme.colorScheme.primary),
+                    ),
+                  ],
+                ),
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.5,
+                ),
               ),
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.5,
+              Text(
+                'TABS  ·  PRACTICE  ·  PLAY MORE',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  letterSpacing: 1.5,
+                  fontSize: 8,
+                ),
               ),
-            ),
-            Text(
-              'TABS  ·  PRACTICE  ·  PLAY MORE',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-                letterSpacing: 1.5,
-                fontSize: 8,
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ],
     );

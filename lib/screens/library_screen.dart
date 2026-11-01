@@ -348,10 +348,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
     children: [
       Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
+        child: Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 12,
+          runSpacing: 8,
           children: [
             Text('Library', style: Theme.of(context).textTheme.headlineSmall),
-            const Spacer(),
             FilledButton.icon(
               onPressed: importTab,
               icon: const Icon(Icons.upload_file),
