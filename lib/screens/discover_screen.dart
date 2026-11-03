@@ -45,6 +45,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   }
 
   Future<void> search() async {
+    FocusManager.instance.primaryFocus?.unfocus();
     if (query.text.trim().isEmpty) return;
     failedResult = null;
     final current = ++generation;
@@ -136,6 +137,8 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
               controller: query,
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => search(),
+              onTapOutside: (_) =>
+                  FocusManager.instance.primaryFocus?.unfocus(),
               decoration: const InputDecoration(
                 labelText: 'Song or artist',
                 prefixIcon: Icon(Icons.search),
@@ -210,6 +213,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
         ),
       Expanded(
         child: ListView.builder(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           itemCount: response?.results.length ?? 0,
           itemBuilder: (context, index) {
             final result = response!.results[index];

@@ -20,10 +20,15 @@ const result = TabSearchResult(
 
 class Provider implements TabSourceProvider, TrackSelectableTabSourceProvider {
   Completer<List<TabSearchResult>> pending = Completer();
+  int searchCalls = 0;
   @override
   String get name => 'Mock';
   @override
-  Future<List<TabSearchResult>> search(TabSearchQuery query) => pending.future;
+  Future<List<TabSearchResult>> search(TabSearchQuery query) {
+    searchCalls++;
+    return pending.future;
+  }
+
   @override
   Future<SavedTab> fetchTab(TabSearchResult result) async =>
       throw const TabTrackSelectionException([
@@ -83,7 +88,7 @@ void main() {
     provider = Provider();
   });
   tearDown(() async => repository.close());
-  Future<void> start(WidgetTester tester) async {
+  Future<void> mount(WidgetTester tester) async {
     provider.pending = Completer();
     await tester.pumpWidget(
       MaterialApp(
@@ -95,10 +100,71 @@ void main() {
         ),
       ),
     );
+  }
+
+  Future<void> start(WidgetTester tester) async {
+    await mount(tester);
     await tester.enterText(find.byType(TextField), 'Song');
     await tester.tap(find.text('Search'));
     await tester.pump();
   }
+
+  bool fieldHasFocus(WidgetTester tester) =>
+      tester.widget<EditableText>(find.byType(EditableText)).focusNode.hasFocus;
+
+  testWidgets('Search button dismisses keyboard and searches', (tester) async {
+    await mount(tester);
+    await tester.enterText(find.byType(TextField), 'Song');
+    expect(fieldHasFocus(tester), isTrue);
+    await tester.tap(find.text('Search'));
+    await tester.pump();
+    expect(fieldHasFocus(tester), isFalse);
+    expect(provider.searchCalls, 1);
+  });
+
+  testWidgets('keyboard Search key dismisses keyboard and searches', (
+    tester,
+  ) async {
+    await mount(tester);
+    await tester.enterText(find.byType(TextField), 'Song');
+    expect(fieldHasFocus(tester), isTrue);
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pump();
+    expect(fieldHasFocus(tester), isFalse);
+    expect(provider.searchCalls, 1);
+  });
+
+  testWidgets('tapping outside the field dismisses keyboard', (tester) async {
+    await mount(tester);
+    await tester.enterText(find.byType(TextField), 'Song');
+    expect(fieldHasFocus(tester), isTrue);
+    await tester.tapAt(const Offset(300, 300));
+    await tester.pump();
+    expect(fieldHasFocus(tester), isFalse);
+    expect(provider.searchCalls, 0);
+  });
+
+  testWidgets('dragging results dismisses keyboard', (tester) async {
+    await start(tester);
+    provider.pending.complete([
+      for (var index = 0; index < 20; index++)
+        TabSearchResult(
+          externalId: '$index',
+          title: 'Song $index',
+          artist: 'Artist',
+          instrument: InstrumentType.guitar,
+          sourceName: 'Mock',
+          sourceUrl: 'https://example.com/$index',
+        ),
+    ]);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+    expect(fieldHasFocus(tester), isTrue);
+    await tester.drag(find.byType(ListView), const Offset(0, -250));
+    await tester.pump();
+    expect(fieldHasFocus(tester), isFalse);
+  });
 
   testWidgets('loading and empty states', (tester) async {
     await start(tester);

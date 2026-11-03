@@ -7,6 +7,7 @@ import 'package:riffshelf/core/database/sqlite_tab_repository.dart';
 import 'package:riffshelf/core/models/instrument_type.dart';
 import 'package:riffshelf/core/models/saved_tab.dart';
 import 'package:riffshelf/features/search/application/tab_search_service.dart';
+import 'package:riffshelf/features/search/data/songsterr_diagnostics.dart';
 import 'package:riffshelf/features/search/data/songsterr_provider.dart';
 import 'package:riffshelf/features/search/domain/tab_source_provider.dart';
 
@@ -99,6 +100,105 @@ void main() {
       const TabSearchQuery(text: 'song', instrument: InstrumentType.bass),
     );
     expect(results.single.instrument, InstrumentType.bass);
+  });
+  group('Songsterr search endpoints', () {
+    const query = TabSearchQuery(text: ' song ');
+    final songs = jsonEncode([
+      {'id': 19, 'title': 'Song', 'artist': 'Artist'},
+    ]);
+
+    test('uses /api/songs first and skips legacy on success', () async {
+      final paths = <String>[];
+      final provider = SongsterrProvider(
+        client: MockClient((request) async {
+          paths.add(request.url.path);
+          expect(request.url.queryParameters['pattern'], 'song');
+          expect(request.url.queryParameters['size'], '50');
+          return http.Response(songs, 200);
+        }),
+      );
+
+      expect(await provider.search(query), hasLength(1));
+      expect(paths, ['/api/songs']);
+    });
+
+    test('falls back to legacy after an HTTP failure', () async {
+      final paths = <String>[];
+      final provider = SongsterrProvider(
+        client: MockClient((request) async {
+          paths.add(request.url.path);
+          return request.url.path == '/api/songs'
+              ? http.Response('Unavailable', 503)
+              : http.Response(songs, 200);
+        }),
+      );
+
+      expect(await provider.search(query), hasLength(1));
+      expect(paths, ['/api/songs', '/a/ra/songs.json']);
+    });
+
+    test('falls back to legacy after a timeout', () async {
+      final paths = <String>[];
+      final provider = SongsterrProvider(
+        timeout: const Duration(milliseconds: 5),
+        client: MockClient((request) async {
+          paths.add(request.url.path);
+          if (request.url.path == '/api/songs') {
+            await Future<void>.delayed(const Duration(milliseconds: 50));
+          }
+          return http.Response(songs, 200);
+        }),
+      );
+
+      expect(await provider.search(query), hasLength(1));
+      expect(paths, ['/api/songs', '/a/ra/songs.json']);
+    });
+
+    test('reports an HTTP failure when both endpoints fail', () async {
+      final paths = <String>[];
+      final provider = SongsterrProvider(
+        client: MockClient((request) async {
+          paths.add(request.url.path);
+          return http.Response('Unavailable', 503);
+        }),
+      );
+
+      await expectLater(
+        provider.search(query),
+        throwsA(
+          isA<SongsterrException>().having(
+            (error) => error.failure,
+            'failure',
+            SongsterrFailure.httpError,
+          ),
+        ),
+      );
+      expect(paths, ['/api/songs', '/a/ra/songs.json']);
+    });
+
+    test('reports a timeout when both endpoints time out', () async {
+      final paths = <String>[];
+      final provider = SongsterrProvider(
+        timeout: const Duration(milliseconds: 5),
+        client: MockClient((request) async {
+          paths.add(request.url.path);
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          return http.Response(songs, 200);
+        }),
+      );
+
+      await expectLater(
+        provider.search(query),
+        throwsA(
+          isA<SongsterrException>().having(
+            (error) => error.failure,
+            'failure',
+            SongsterrFailure.timeout,
+          ),
+        ),
+      );
+      expect(paths, ['/api/songs', '/a/ra/songs.json']);
+    });
   });
   test(
     'fetches selected real structured track from mocked responses',

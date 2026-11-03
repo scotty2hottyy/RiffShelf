@@ -72,16 +72,22 @@ class SongsterrProvider
         .replace(queryParameters: {'pattern': query.text.trim()});
     final modern = Uri.parse('$_baseUrl/api/songs')
         .replace(queryParameters: {'pattern': query.text.trim(), 'size': '50'});
-    var response = await _structuredClient.request(
-      legacy,
-      SongsterrStage.search,
-      _searchTrace,
-    );
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      // The live legacy endpoint currently returns 404. Search-only fallback;
-      // neither request needs revision/track metadata.
+    http.Response? response;
+    try {
       response = await _structuredClient.request(
         modern,
+        SongsterrStage.search,
+        _searchTrace,
+      );
+    } on SongsterrException {
+      // A failed search request can use the legacy endpoint. Tab downloads
+      // still use their own structured metadata and track endpoints.
+    }
+    if (response == null ||
+        response.statusCode < 200 ||
+        response.statusCode >= 300) {
+      response = await _structuredClient.request(
+        legacy,
         SongsterrStage.search,
         _searchTrace,
       );
