@@ -1,6 +1,6 @@
 # RiffShelf backend
 
-This independent FastAPI service is the starting point for search and metadata APIs. `GET /health` returns `{"status":"ok"}` when the process responds; it is not a check of external providers. The `/api/v1` router is reserved for future search and metadata routes. No provider endpoints or tab storage are included.
+This independent FastAPI service exposes Songsterr search metadata. `GET /health` returns `{"status":"ok"}` when the process responds; it is not a check of external providers. No tab bodies or personal files are stored.
 
 ## Install, run, and test on macOS or Linux
 
@@ -21,9 +21,22 @@ These commands use a project-local virtual environment and pinned direct and tra
 curl -fsS http://127.0.0.1:8000/health
 curl -fsS http://127.0.0.1:8000/docs
 curl -fsS http://127.0.0.1:8000/openapi.json
+curl -G --data-urlencode 'q=Come As You Are' http://127.0.0.1:8000/api/v1/search/tabs
 ```
 
 Open `http://127.0.0.1:8000/docs` in a browser for the interactive Swagger UI (its assets require network access). Stop the server with Ctrl-C and leave the virtual environment with `deactivate`.
+
+## Search contract
+
+`GET /api/v1/search/tabs?q=<song title or artist>` returns `200` with `{"results":[...]}`. Each result represents one Songsterr song and one identified instrument (`guitar` or `bass`). The response contains `artist`, `title`, `source` (`Songsterr`), `source_id`, `source_url`, `instrument`, `available_arrangements` (track `name` and `tuning`), and song/instrument `tuning`. Tuning is an array of pitch names from lowest to highest string; unknown names or tunings are `null`. The top-level tuning is `null` if the arrangements disagree or any arrangement lacks tuning. Songs without identified guitar or bass tracks are omitted. An empty search is `{"results":[]}`.
+
+Example response excerpt for the request above (live Songsterr result on 2026-11-03):
+
+```json
+{"results":[{"artist":"Nirvana","title":"Come As You Are","source":"Songsterr","source_id":"14","source_url":"https://www.songsterr.com/a/wsa/song?id=14","instrument":"bass","available_arrangements":[{"name":"Krist Novoselic | Gibson Ripper | Bass","tuning":["D1","G1","C2","F2"]}],"tuning":["D1","G1","C2","F2"]}]}
+```
+
+The example shows one result from a larger response. Query validation returns `422` for missing, duplicate, blank, control-character, or over-120-character `q`. The process-local per-client-address limit returns `429` after 30 valid requests per rolling minute by default. Songsterr HTTP/network failures and malformed responses return `502`; upstream timeouts return `504`. All errors use `{"error":{"code":"...","message":"..."}}`, with codes `invalid_query`, `rate_limited`, `provider_failure`, `provider_timeout`, or `malformed_provider_response`. Rate limits are per process and reset on restart; this service does not trust proxy forwarding headers by default.
 
 ## Configuration
 
@@ -35,6 +48,8 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 No credentials are required. The host and port are Uvicorn command-line options, not assumed deployment settings. Do not commit secrets or local environment files.
+
+`RIFFSHELF_SONGSTERR_TIMEOUT_SECONDS` defaults to `8` (positive, at most `60`) for each upstream request. `RIFFSHELF_SEARCH_RATE_LIMIT_PER_MINUTE` defaults to `30` (positive integer). Invalid values fail startup. The search adapter first tries the legacy Songsterr URL and falls back to `/api/songs` after a non-success status. These unofficial endpoints may change.
 
 ## Before any SkyNet deployment
 
