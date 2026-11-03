@@ -41,3 +41,7 @@ On macOS, start an iOS Simulator with `open -a Simulator`, then run `flutter run
 flutter analyze
 flutter test
 ```
+
+## Search and metadata backend
+
+The independent FastAPI service and its setup, testing, and deployment-planning instructions are in [server/README.md](server/README.md).
