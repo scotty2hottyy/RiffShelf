@@ -15,8 +15,9 @@ class CombinedSearchResponse {
 }
 
 class TabSearchService {
-  const TabSearchService(this.providers);
+  const TabSearchService(this.providers, {this.searchProvider});
   final List<TabSourceProvider> providers;
+  final TabSearchProvider? searchProvider;
 
   Future<SavedTab> fetch(
     TabSearchResult result, [
@@ -45,6 +46,27 @@ class TabSearchService {
   }
 
   Future<CombinedSearchResponse> search(TabSearchQuery query) async {
+    if (searchProvider case final provider?) {
+      try {
+        return CombinedSearchResponse(
+          results: (await provider.search(query))
+              .where(
+                (result) =>
+                    (query.instrument == null ||
+                        result.instrument == query.instrument) &&
+                    (query.type == null ||
+                        result.availableTypes.contains(query.type)),
+              )
+              .toList(),
+          failures: const [],
+        );
+      } on Object catch (error) {
+        return CombinedSearchResponse(
+          results: const [],
+          failures: [ProviderSearchFailure(provider: 'Backend', error: error)],
+        );
+      }
+    }
     final batches = await Future.wait(
       providers.map((provider) async {
         try {

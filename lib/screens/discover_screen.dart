@@ -5,6 +5,7 @@ import '../core/database/tab_repository.dart';
 import '../core/models/instrument_type.dart';
 import '../core/models/saved_tab.dart';
 import '../features/search/application/tab_search_service.dart';
+import '../features/search/data/backend_tab_search_client.dart';
 import '../features/search/data/songsterr_provider.dart';
 import '../features/search/domain/tab_source_provider.dart';
 import '../features/tabs/tab_detail_screen.dart';
@@ -18,8 +19,15 @@ class DiscoverScreen extends StatefulWidget {
 }
 
 class _DiscoverScreenState extends State<DiscoverScreen> {
+  static const apiBaseUrl = String.fromEnvironment('RIFFSHELF_API_BASE_URL');
   late final service =
-      widget.service ?? TabSearchService([SongsterrProvider()]);
+      widget.service ??
+      TabSearchService(
+        [SongsterrProvider()],
+        searchProvider: apiBaseUrl.trim().isEmpty
+            ? null
+            : BackendTabSearchClient(baseUrl: apiBaseUrl),
+      );
   late final repository = widget.repository ?? SqliteTabRepository.local();
   final query = TextEditingController();
   InstrumentType? instrument;

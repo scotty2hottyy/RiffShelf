@@ -20,6 +20,7 @@ class TabSearchResult {
     this.type = TabType.tab,
     this.tuning,
     this.stringCount,
+    this.availableArrangements = const [],
   });
   final String externalId;
   final String title;
@@ -31,6 +32,13 @@ class TabSearchResult {
   final TabType type;
   final List<String>? tuning;
   final int? stringCount;
+  final List<TabArrangement> availableArrangements;
+}
+
+class TabArrangement {
+  const TabArrangement({this.name, this.tuning});
+  final String? name;
+  final List<String>? tuning;
 }
 
 enum TabProviderErrorKind { network, timeout, http, malformed, unknown }
@@ -81,8 +89,11 @@ abstract interface class RecoverableTabSourceProvider {
 }
 
 /// Website-independent boundary for future online tab integrations.
-abstract interface class TabSourceProvider {
-  String get name;
+abstract interface class TabSearchProvider {
   Future<List<TabSearchResult>> search(TabSearchQuery query);
+}
+
+abstract interface class TabSourceProvider implements TabSearchProvider {
+  String get name;
   Future<SavedTab> fetchTab(TabSearchResult result);
 }
