@@ -11,6 +11,8 @@ cd server
 python3.14 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+python -m compileall -q app tests
+python -m ruff check app tests
 python -m pytest
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
@@ -38,6 +40,14 @@ Example response excerpt for the request above (live Songsterr result on 2026-11
 
 The example shows one result from a larger response. Query validation returns `422` for missing, duplicate, blank, control-character, or over-120-character `q`. The process-local per-client-address limit returns `429` after 30 valid requests per rolling minute by default. Songsterr HTTP/network failures and malformed responses return `502`; upstream timeouts return `504`. All errors use `{"error":{"code":"...","message":"..."}}`, with codes `invalid_query`, `rate_limited`, `provider_failure`, `provider_timeout`, or `malformed_provider_response`. Rate limits are per process and reset on restart; this service does not trust proxy forwarding headers by default.
 
+Example error response (HTTP 429):
+
+```json
+{"error":{"code":"rate_limited","message":"Search rate limit exceeded. Try again in one minute."}}
+```
+
+The backend test suite uses mocked Songsterr HTTP responses and needs no live internet. GitHub Actions runs Python 3.14, pinned dependencies, syntax checks, Ruff, and pytest as a separate required-to-pass job alongside the existing Flutter validation and builds.
+
 ## Configuration
 
 `RIFFSHELF_DOCS_ENABLED` defaults to `true` for local development. Set it to `false` before starting the service to disable `/docs` and `/openapi.json`. Values are case-insensitive `true` or `false`; invalid values fail startup. For example:
@@ -50,6 +60,19 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 No credentials are required. The host and port are Uvicorn command-line options, not assumed deployment settings. Do not commit secrets or local environment files.
 
 `RIFFSHELF_SONGSTERR_TIMEOUT_SECONDS` defaults to `8` (positive, at most `60`) for each upstream request. `RIFFSHELF_SEARCH_RATE_LIMIT_PER_MINUTE` defaults to `30` (positive integer). Invalid values fail startup. The search adapter first tries the legacy Songsterr URL and falls back to `/api/songs` after a non-success status. These unofficial endpoints may change.
+
+## Local Flutter integration demonstration
+
+On a Mac with the iOS simulator booted, start the backend in one terminal using the setup above. From the repository root in another terminal, run:
+
+```sh
+flutter pub get
+flutter test integration_test/live_backend_search_test.dart -d <simulator-device-id> --dart-define=RIFFSHELF_API_BASE_URL=http://127.0.0.1:8000
+```
+
+The optional integration test enters “Come As You Are” in Discover, taps Search, and checks that Nirvana/Songsterr results appear. It uses real Songsterr access, so it is separate from CI and requires a reachable provider. A local iOS simulator run on 2026-11-03 passed, and the FastAPI log recorded its `GET /api/v1/search/tabs` request with HTTP 200. Local HTTP is accepted by the debug app; release builds require an HTTPS backend URL. For Android or a physical device, use a reachable host address or HTTPS endpoint rather than assuming that the device's loopback address is the Mac. The simulator demonstration does not verify deployed network access or a physical device.
+
+The backend returns search metadata only. Songsterr's unofficial endpoints and content availability can change. A TestFlight build without `RIFFSHELF_API_BASE_URL` continues to search Songsterr directly; a configured backend failure is shown in Discover with Retry. Saved SQLite tabs remain available offline.
 
 ## Before any SkyNet deployment
 

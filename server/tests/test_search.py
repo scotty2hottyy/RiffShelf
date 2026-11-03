@@ -54,6 +54,35 @@ def test_valid_search_and_instruments():
     assert bass["available_arrangements"] == [{"name": "Bass", "tuning": ["E1", "A1", "D2", "G2"]}]
 
 
+def test_http_contract_with_mocked_upstream(monkeypatch):
+    """Exercise FastAPI -> real adapter -> mocked Songsterr without internet."""
+    real_client = httpx.Client
+    requests = []
+
+    def upstream(request):
+        requests.append((request.url.path, request.url.params.get("pattern")))
+        if request.url.path.endswith("songs.json"):
+            return httpx.Response(404)
+        return httpx.Response(200, json=SONGS)
+
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: real_client(
+        transport=httpx.MockTransport(upstream), **kwargs))
+    with TestClient(create_app()) as client:
+        response = client.get("/api/v1/search/tabs", params={"q": "Come As You Are"})
+        schema = client.get("/openapi.json").json()
+    assert response.status_code == 200
+    assert requests == [
+        ("/a/ra/songs.json", "Come As You Are"),
+        ("/api/songs", "Come As You Are"),
+    ]
+    assert response.json() == {"results": normalize(SONGS)}
+    assert "/api/v1/search/tabs" in schema["paths"]
+    assert schema["components"]["schemas"]["TabResult"]["required"] == [
+        "artist", "title", "source", "source_id", "source_url",
+        "instrument", "available_arrangements", "tuning",
+    ]
+
+
 def test_unknown_metadata_and_empty_results():
     result = normalize([{"id": 9, "title": "Song", "artist": {"name": "Artist"},
                          "tracks": [{"instrument": "Guitar"}, {"instrument": "Guitar", "name": "Lead", "tuning": [64, 59, 55, 50, 45, 40]}]}])
