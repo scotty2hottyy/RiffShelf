@@ -12,6 +12,8 @@ enum SongsterrStage {
   display,
 }
 
+enum SongsterrRequestPhase { connection, response, bodyRead }
+
 enum SongsterrFailure {
   networkUnreachable,
   timeout,
@@ -81,6 +83,7 @@ class SongsterrDiagnostics {
     String? contentType,
     String? result,
     SongsterrFailure? failure,
+    SongsterrRequestPhase? phase,
   }) {
     final name = stage.name
         .replaceAllMapped(RegExp(r'[A-Z]'), (match) => '_${match[0]}')
@@ -88,6 +91,7 @@ class SongsterrDiagnostics {
     final fields = [
       name,
       if (endpoint != null) '${endpoint.host}${endpoint.path}',
+      if (phase != null) 'phase=${phase.name}',
       if (status != null) 'HTTP $status',
       if (bytes != null) '$bytes bytes',
       if (contentType != null) contentType.split(';').first,

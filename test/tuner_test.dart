@@ -78,6 +78,42 @@ void main() {
       expect(find.text('Try again'), findsOneWidget);
     });
 
+    for (final (width, twoRows) in [(393.0, true), (430.0, false)]) {
+      testWidgets('lays out six strings at $width pixels', (tester) async {
+        await tester.binding.setSurfaceSize(Size(width, 850));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        await pumpTuner(tester, FakeInput(MicrophoneStatus.available));
+
+        final first = find.byKey(const Key('tuner-strings-first-row'));
+        final second = find.byKey(const Key('tuner-strings-second-row'));
+        final single = find.byKey(const Key('tuner-strings-single-row'));
+        if (twoRows) {
+          expect(first, findsOneWidget);
+          expect(second, findsOneWidget);
+          expect(single, findsNothing);
+          expect(
+            find.descendant(of: first, matching: find.byType(Text)),
+            findsNWidgets(3),
+          );
+          expect(
+            find.descendant(of: second, matching: find.byType(Text)),
+            findsNWidgets(3),
+          );
+          expect(tester.getCenter(first).dx, closeTo(width / 2, 1));
+          expect(tester.getCenter(second).dx, closeTo(width / 2, 1));
+        } else {
+          expect(single, findsOneWidget);
+          expect(first, findsNothing);
+          expect(second, findsNothing);
+          expect(
+            find.descendant(of: single, matching: find.byType(Text)),
+            findsNWidgets(6),
+          );
+        }
+        expect(tester.takeException(), isNull);
+      });
+    }
+
     testWidgets('explains when permission is denied', (tester) async {
       await pumpTuner(tester, FakeInput(MicrophoneStatus.permissionDenied));
       await tester.tap(find.text('Start tuning'));

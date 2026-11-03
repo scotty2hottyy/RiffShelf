@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -9,6 +11,7 @@ import 'package:riffshelf/core/models/saved_tab.dart';
 import 'package:riffshelf/features/search/application/tab_search_service.dart';
 import 'package:riffshelf/features/search/data/songsterr_diagnostics.dart';
 import 'package:riffshelf/features/search/data/songsterr_provider.dart';
+import 'package:riffshelf/features/search/data/songsterr_structured_client.dart';
 import 'package:riffshelf/features/search/domain/tab_source_provider.dart';
 
 import 'support/songsterr_fixtures.dart';
@@ -29,6 +32,15 @@ class FakeProvider implements TabSourceProvider {
 
   @override
   Future<SavedTab> fetchTab(TabSearchResult result) async => tab!;
+}
+
+class StreamClient extends http.BaseClient {
+  StreamClient(this.sendResponse);
+  final Future<http.StreamedResponse> Function() sendResponse;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) =>
+      sendResponse();
 }
 
 void main() {
@@ -198,6 +210,54 @@ void main() {
         ),
       );
       expect(paths, ['/api/songs', '/a/ra/songs.json']);
+    });
+  });
+  group('Songsterr request diagnostics', () {
+    final uri = Uri.parse('https://www.songsterr.com/api/songs?pattern=secret');
+
+    Future<SongsterrDiagnostics> failureTrace(
+      Future<http.StreamedResponse> Function() sendResponse,
+      String phase,
+    ) async {
+      final trace = SongsterrDiagnostics();
+      final client = SongsterrStructuredClient(
+        client: StreamClient(sendResponse),
+        timeout: const Duration(milliseconds: 20),
+      );
+      await expectLater(
+        client.request(uri, SongsterrStage.search, trace),
+        throwsA(isA<SongsterrException>()),
+      );
+      expect(trace.report, contains('phase=$phase'));
+      expect(trace.report, isNot(contains('secret')));
+      return trace;
+    }
+
+    test('separates connection and response failures', () async {
+      final connection = await failureTrace(
+        () async => throw const SocketException('private connection details'),
+        'connection',
+      );
+      expect(connection.report, isNot(contains('private connection details')));
+      final response = await failureTrace(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        return http.StreamedResponse(const Stream.empty(), 200);
+      }, 'response');
+      expect(response.report, contains('failure=timeout'));
+    });
+
+    test('records a body-read timeout after response headers', () async {
+      final trace = await failureTrace(
+        () async => http.StreamedResponse(
+          Stream<List<int>>.fromFuture(
+            Future.delayed(const Duration(milliseconds: 50), () => [1]),
+          ),
+          200,
+        ),
+        'bodyRead',
+      );
+      expect(trace.report, contains('HTTP 200'));
+      expect(trace.report, contains('failure=timeout'));
     });
   });
   test(

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
@@ -81,45 +82,95 @@ class SongsterrStructuredClient {
     SongsterrStage stage,
     SongsterrDiagnostics trace,
   ) async {
-    try {
-      return await (() async {
-        for (var redirects = 0; redirects <= 3; redirects++) {
-          if (uri.scheme != 'https' ||
-              uri.host.isEmpty ||
-              uri.userInfo.isNotEmpty) {
-            throw SongsterrException(SongsterrFailure.httpError);
-          }
-          final request = http.Request('GET', uri)..followRedirects = false;
-          request.headers.addAll(headers);
-          final response = await http.Response.fromStream(
-            await _client.send(request),
-          );
-          trace.record(
-            stage,
-            endpoint: uri,
-            status: response.statusCode,
-            bytes: response.bodyBytes.length,
-            contentType: response.headers['content-type'],
-          );
-          if ([301, 302, 303, 307, 308].contains(response.statusCode) &&
-              response.headers['location'] != null) {
-            uri = uri.resolve(response.headers['location']!);
-            continue;
-          }
-          return response;
-        }
-        throw SongsterrException(SongsterrFailure.httpError);
-      })().timeout(timeout);
-    } on TimeoutException {
-      trace.record(stage, failure: SongsterrFailure.timeout);
-      throw SongsterrException(SongsterrFailure.timeout);
-    } on SongsterrException catch (error) {
-      trace.record(stage, failure: error.failure);
-      rethrow;
-    } on Object {
-      trace.record(stage, failure: SongsterrFailure.networkUnreachable);
-      throw SongsterrException(SongsterrFailure.networkUnreachable);
+    final clock = Stopwatch()..start();
+    Duration remaining() {
+      final left = timeout - clock.elapsed;
+      return left.isNegative ? Duration.zero : left;
     }
+
+    for (var redirects = 0; redirects <= 3; redirects++) {
+      if (uri.scheme != 'https' ||
+          uri.host.isEmpty ||
+          uri.userInfo.isNotEmpty) {
+        trace.record(stage, failure: SongsterrFailure.httpError);
+        throw SongsterrException(SongsterrFailure.httpError);
+      }
+      final request = http.Request('GET', uri)..followRedirects = false;
+      request.headers.addAll(headers);
+      late final http.StreamedResponse streamed;
+      try {
+        streamed = await _client.send(request).timeout(remaining());
+      } on TimeoutException {
+        trace.record(
+          stage,
+          endpoint: uri,
+          phase: SongsterrRequestPhase.response,
+          failure: SongsterrFailure.timeout,
+        );
+        throw SongsterrException(SongsterrFailure.timeout);
+      } on SocketException {
+        trace.record(
+          stage,
+          endpoint: uri,
+          phase: SongsterrRequestPhase.connection,
+          failure: SongsterrFailure.networkUnreachable,
+        );
+        throw SongsterrException(SongsterrFailure.networkUnreachable);
+      } on Object {
+        trace.record(
+          stage,
+          endpoint: uri,
+          phase: SongsterrRequestPhase.response,
+          failure: SongsterrFailure.networkUnreachable,
+        );
+        throw SongsterrException(SongsterrFailure.networkUnreachable);
+      }
+      trace.record(
+        stage,
+        endpoint: uri,
+        phase: SongsterrRequestPhase.response,
+        status: streamed.statusCode,
+      );
+      late final http.Response response;
+      try {
+        response = await http.Response.fromStream(streamed)
+            .timeout(remaining());
+      } on TimeoutException {
+        trace.record(
+          stage,
+          endpoint: uri,
+          phase: SongsterrRequestPhase.bodyRead,
+          status: streamed.statusCode,
+          failure: SongsterrFailure.timeout,
+        );
+        throw SongsterrException(SongsterrFailure.timeout);
+      } on Object {
+        trace.record(
+          stage,
+          endpoint: uri,
+          phase: SongsterrRequestPhase.bodyRead,
+          status: streamed.statusCode,
+          failure: SongsterrFailure.networkUnreachable,
+        );
+        throw SongsterrException(SongsterrFailure.networkUnreachable);
+      }
+      trace.record(
+        stage,
+        endpoint: uri,
+        phase: SongsterrRequestPhase.bodyRead,
+        status: response.statusCode,
+        bytes: response.bodyBytes.length,
+        contentType: response.headers['content-type'],
+      );
+      if ([301, 302, 303, 307, 308].contains(response.statusCode) &&
+          response.headers['location'] != null) {
+        uri = uri.resolve(response.headers['location']!);
+        continue;
+      }
+      return response;
+    }
+    trace.record(stage, failure: SongsterrFailure.httpError);
+    throw SongsterrException(SongsterrFailure.httpError);
   }
 
   Future<SongsterrSongData> fetchSong(

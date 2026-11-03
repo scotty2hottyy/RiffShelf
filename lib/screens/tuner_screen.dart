@@ -163,18 +163,34 @@ class _MeterCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 20),
-          Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final note in controller.preset.notes)
-                _StringBadge(
-                  note: note,
-                  active: reading?.targetNote == note,
-                  color: color,
-                ),
-            ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final notes = controller.preset.notes;
+              Widget row(List<String> rowNotes, String key) => Row(
+                key: Key(key),
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  for (var index = 0; index < rowNotes.length; index++) ...[
+                    if (index > 0) const SizedBox(width: 8),
+                    _StringBadge(
+                      note: rowNotes[index],
+                      active: reading?.targetNote == rowNotes[index],
+                      color: color,
+                    ),
+                  ],
+                ],
+              );
+              if (notes.length == 6 && constraints.maxWidth < 316) {
+                return Column(
+                  children: [
+                    row(notes.sublist(0, 3), 'tuner-strings-first-row'),
+                    const SizedBox(height: 8),
+                    row(notes.sublist(3), 'tuner-strings-second-row'),
+                  ],
+                );
+              }
+              return row(notes, 'tuner-strings-single-row');
+            },
           ),
         ],
       ),
