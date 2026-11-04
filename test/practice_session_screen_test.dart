@@ -247,10 +247,7 @@ void main() {
     );
     await tester.pumpWidget(MaterialApp(home: PracticeSessionScreen(tab: tab)));
 
-    expect(
-      find.byKey(const ValueKey('practice-section-slider')),
-      findsNothing,
-    );
+    expect(find.byKey(const ValueKey('practice-section-slider')), findsNothing);
   });
 
   testWidgets(
