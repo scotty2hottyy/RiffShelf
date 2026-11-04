@@ -44,13 +44,74 @@ void main() {
       const MaterialApp(home: PracticeSessionScreen(tab: tab)),
     );
     expect(
-      find.text(
-        'Practice mode needs structured tab data, which isn\'t '
-        'available for this tab.',
-      ),
+      find.textContaining('Practice mode needs structured tab data'),
       findsOneWidget,
     );
     expect(find.byKey(const ValueKey('practice-track')), findsNothing);
+  });
+
+  testWidgets(
+    'invalid timing displays static notes without playback controls',
+    (tester) async {
+      final tab = SavedTab(
+        title: 'Damaged',
+        artist: '',
+        source: '',
+        sourceUrl: '',
+        instrument: InstrumentType.bass,
+        stringCount: 4,
+        tuning: const ['D1', 'G1', 'C2', 'F2'],
+        measures: const [
+          TabMeasure(
+            number: 1,
+            numerator: 0,
+            beats: [
+              TabBeat(position: 0, notes: [TabNote(stringNumber: 1, fret: 5)]),
+            ],
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        MaterialApp(home: PracticeSessionScreen(tab: tab)),
+      );
+      expect(
+        find.textContaining('Timed practice is unavailable'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Measure 1'), findsOneWidget);
+      expect(find.byKey(const ValueKey('practice-track')), findsNothing);
+      expect(find.byKey(const ValueKey('practice-play-pause')), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('repeated pause, seek, speed and replay stay within boundaries', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: PracticeSessionScreen(tab: buildTab())),
+    );
+    for (var i = 0; i < 3; i++) {
+      await tester.tap(find.byKey(const ValueKey('practice-play-pause')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.byKey(const ValueKey('practice-play-pause')));
+      await tester.pump();
+      await tester.drag(
+        find.byKey(const ValueKey('practice-track')),
+        const Offset(-100, 0),
+      );
+      await tester.pump();
+      await tester.drag(
+        find.byKey(const ValueKey('practice-speed-slider')),
+        const Offset(30, 0),
+      );
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    }
+    await tester.tap(find.byTooltip('Restart'));
+    await tester.pump();
+    expect(find.text('Measure 1 of 4'), findsOneWidget);
   });
 
   testWidgets('renders the string lanes, playhead and starting measure', (

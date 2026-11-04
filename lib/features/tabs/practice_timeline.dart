@@ -1,15 +1,11 @@
+import '../../core/models/instrument_type.dart';
 import '../../core/models/saved_tab.dart';
 import '../../core/models/tab_structure.dart';
 
-/// Smallest duration (in quarter-note beats) assigned to a note so it always
-/// renders with a visible, non-zero span even when source data is missing,
-/// zero, or negative.
-const double minNoteDurationBeats = 0.05;
-
 /// A single note normalized onto the tab's absolute practice timeline, in
 /// quarter-note beats measured from the start of the tab. Unlike the raw
-/// [TabNote]/[TabBeat] pair it came from, every event here has a guaranteed
-/// positive duration and a position clamped to its source measure.
+/// [TabNote]/[TabBeat] pair it came from, every event here has a positive
+/// source duration and a position within its source measure.
 class TimedNoteEvent {
   const TimedNoteEvent({
     required this.startBeat,
@@ -42,12 +38,8 @@ class MeasureMarker {
 /// can scrub through deterministically, independent of any particular tempo.
 ///
 /// Source tab data (hand-edited, imported, or parsed from ASCII/Guitar Pro)
-/// can be messy: beats may arrive out of time order within a measure, carry
-/// a missing/zero/negative duration, declare a position outside the
-/// measure's bounds, use an invalid time signature, or duplicate the exact
-/// same note twice. This collapses all of that into clean, clamped,
-/// de-duplicated, time-ordered events so the practice scroller never has to
-/// special-case malformed input.
+/// can be messy. Invalid timing makes the entire timeline unsuitable for
+/// playback; callers can then display static tablature instead of guessing.
 class PracticeTimeline {
   factory PracticeTimeline.fromTab(SavedTab tab) {
     final markers = <MeasureMarker>[];
@@ -56,10 +48,18 @@ class PracticeTimeline {
     // collapse to one (keeping the last write), while chords - distinct
     // strings sounding at the same beat - are left untouched.
     final indexByKey = <String, int>{};
+    var hasReliableTiming =
+        tab.tabType != TabType.other &&
+        tab.tabType != TabType.chords &&
+        tab.tuning.length == tab.stringCount;
 
     var cursor = 0.0;
     for (final measure in tab.measures) {
       final measureLength = _measureLengthBeats(measure);
+      if (measureLength == null) {
+        hasReliableTiming = false;
+        break;
+      }
       markers.add(MeasureMarker(number: measure.number, startBeat: cursor));
 
       // Beats aren't guaranteed to arrive in time order from every source,
@@ -68,14 +68,27 @@ class PracticeTimeline {
         ..sort((a, b) => a.position.compareTo(b.position));
 
       for (final beat in orderedBeats) {
+        if (!beat.position.isFinite ||
+            beat.position < 0 ||
+            beat.position >= measureLength ||
+            !beat.duration.isFinite ||
+            beat.duration <= 0) {
+          hasReliableTiming = false;
+          continue;
+        }
         if (beat.isRest || beat.notes.isEmpty) continue;
-        final position = beat.position.clamp(0, measureLength).toDouble();
-        final onset = _round(cursor + position);
+        final onset = _round(cursor + beat.position);
         for (final note in beat.notes) {
           final rawDuration = note.duration ?? beat.duration;
-          final duration = _round(
-            rawDuration <= 0 ? minNoteDurationBeats : rawDuration,
-          );
+          if (note.stringNumber < 1 ||
+              note.stringNumber > tab.stringCount ||
+              note.fret < 0 ||
+              !rawDuration.isFinite ||
+              rawDuration <= 0) {
+            hasReliableTiming = false;
+            continue;
+          }
+          final duration = _round(rawDuration);
           final key = '${note.stringNumber}:$onset';
           final event = TimedNoteEvent(
             startBeat: onset,
@@ -103,9 +116,10 @@ class PracticeTimeline {
     });
 
     return PracticeTimeline._(
-      events: List.unmodifiable(events),
-      measures: List.unmodifiable(markers),
-      totalBeats: cursor,
+      events: hasReliableTiming ? List.unmodifiable(events) : const [],
+      measures: hasReliableTiming ? List.unmodifiable(markers) : const [],
+      totalBeats: hasReliableTiming ? cursor : 0,
+      hasReliableTiming: hasReliableTiming && events.isNotEmpty,
     );
   }
 
@@ -113,6 +127,7 @@ class PracticeTimeline {
     required this.events,
     required this.measures,
     required this.totalBeats,
+    required this.hasReliableTiming,
   });
 
   /// Time-ordered, normalized note events.
@@ -124,10 +139,13 @@ class PracticeTimeline {
   /// Length of the full tab, in quarter-note beats.
   final double totalBeats;
 
-  static double _measureLengthBeats(TabMeasure measure) {
-    final numerator = measure.numerator > 0 ? measure.numerator : 4;
-    final denominator = measure.denominator > 0 ? measure.denominator : 4;
-    return numerator * 4 / denominator;
+  /// Whether the source can safely drive timed playback.
+  final bool hasReliableTiming;
+
+  static double? _measureLengthBeats(TabMeasure measure) {
+    if (measure.numerator <= 0 || measure.denominator <= 0) return null;
+    final length = measure.numerator * 4 / measure.denominator;
+    return length.isFinite && length > 0 ? length : null;
   }
 
   /// Rounds to a tenth of a millibeat to absorb binary floating-point drift

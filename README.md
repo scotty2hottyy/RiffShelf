@@ -42,6 +42,12 @@ flutter analyze
 flutter test
 ```
 
+## Practice timing compatibility
+
+Timed practice uses structured measure and note data from supported guitar and bass arrangements, including imported GP3, GP4, GP5, and GPX tracks. It supports four, five, six, and other positive string counts, alternate tunings, simultaneous notes, rests, sustained note durations, variable time signatures, speed changes, seeking, and measure-section loops. Notes scroll from right to left. The authored BPM sets the normal speed; tabs without BPM use a 100 BPM practice reference.
+
+Practice requires valid measure signatures, finite note positions within each measure, positive finite durations, and valid string and fret numbers. An empty measure with a valid signature still contributes its full length. If the structure is missing, has unsupported format metadata, or contains unreliable timing, practice shows static source tablature without playback controls. Text imports have no inferred musical timing. The static view preserves note order but does not infer rhythm from damaged data. Tempo automation, repeats, ties, and expressive techniques from source files are not currently modeled by the practice timeline.
+
 ## Search and metadata backend
 
 The independent FastAPI service and its setup, testing, and deployment-planning instructions are in [server/README.md](server/README.md).

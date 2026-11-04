@@ -3,6 +3,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/models/saved_tab.dart';
+import '../../core/models/tab_structure.dart';
 import 'practice_timeline.dart';
 
 /// Full-screen right-to-left scrolling practice mode: notes approach a fixed
@@ -209,17 +210,8 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
     final trackHeight = _topPadding * 2 + (tab.stringCount - 1) * stringSpacing;
     return Scaffold(
       appBar: AppBar(title: Text('Practice · ${tab.title}')),
-      body: !tab.hasStructuredContent
-          ? const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                  'Practice mode needs structured tab data, which isn\'t '
-                  'available for this tab.',
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            )
+      body: !_timeline.hasReliableTiming
+          ? _StaticPracticeTab(tab: tab)
           : Column(
               children: [
                 Padding(
@@ -360,6 +352,68 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
       }
     }
     return current;
+  }
+}
+
+/// Shows source notes without assigning playback positions to damaged timing.
+class _StaticPracticeTab extends StatelessWidget {
+  const _StaticPracticeTab({required this.tab});
+
+  final SavedTab tab;
+
+  String _measureText(int number, List<TabBeat> beats) {
+    final lines = <String>['Measure $number'];
+    for (var string = 1; string <= tab.stringCount; string++) {
+      final label = tab.tuning.length == tab.stringCount
+          ? tab.tuning[tab.stringCount - string]
+          : 'String $string';
+      final frets = [
+        for (final beat in beats)
+          beat.notes
+              .where((note) => note.stringNumber == string && note.fret >= 0)
+              .map((note) => note.fret)
+              .join(',')
+              .padRight(2, '-'),
+      ].join('-');
+      lines.add('$label|$frets');
+    }
+    return lines.join('\n');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasNotes = tab.measures.any(
+      (measure) => measure.beats.any((beat) => beat.notes.isNotEmpty),
+    );
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Text(
+          hasNotes || tab.hasTextContent
+              ? 'Timed practice is unavailable for this tab. Static tablature is shown below.'
+              : 'Timed practice is unavailable for this tab.',
+        ),
+        const SizedBox(height: 16),
+        if (tab.hasTextContent)
+          SelectableText(
+            tab.asciiTab,
+            style: const TextStyle(fontFamily: 'monospace'),
+          )
+        else if (hasNotes)
+          for (final measure in tab.measures)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: SelectableText(
+                _measureText(measure.number, measure.beats),
+                style: const TextStyle(fontFamily: 'monospace'),
+              ),
+            )
+        else
+          const Text(
+            'Practice mode needs structured tab data, which isn\'t available for this tab.',
+          ),
+      ],
+    );
   }
 }
 
