@@ -2,63 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../../core/models/saved_tab.dart';
-import '../../core/models/tab_structure.dart';
-
-/// A note flattened to its absolute position in the song timeline.
-class _PracticeNote {
-  const _PracticeNote({
-    required this.beat,
-    required this.stringNumber,
-    required this.fret,
-  });
-  final double beat;
-  final int stringNumber;
-  final int fret;
-}
-
-/// A measure boundary flattened to its absolute position in the timeline.
-class _MeasureMarker {
-  const _MeasureMarker({required this.number, required this.beat});
-  final int number;
-  final double beat;
-}
-
-double _measureLength(TabMeasure measure) =>
-    measure.numerator * 4 / measure.denominator;
-
-List<_PracticeNote> _flattenNotes(SavedTab tab) {
-  final notes = <_PracticeNote>[];
-  var cursor = 0.0;
-  for (final measure in tab.measures) {
-    for (final beat in measure.beats) {
-      if (beat.isRest) continue;
-      for (final note in beat.notes) {
-        notes.add(
-          _PracticeNote(
-            beat: cursor + beat.position,
-            stringNumber: note.stringNumber,
-            fret: note.fret,
-          ),
-        );
-      }
-    }
-    cursor += _measureLength(measure);
-  }
-  return notes;
-}
-
-List<_MeasureMarker> _measureMarkers(SavedTab tab) {
-  final markers = <_MeasureMarker>[];
-  var cursor = 0.0;
-  for (final measure in tab.measures) {
-    markers.add(_MeasureMarker(number: measure.number, beat: cursor));
-    cursor += _measureLength(measure);
-  }
-  return markers;
-}
-
-double _totalBeatsOf(SavedTab tab) =>
-    tab.measures.fold(0.0, (sum, measure) => sum + _measureLength(measure));
+import 'practice_timeline.dart';
 
 /// Full-screen right-to-left scrolling practice mode: notes approach a fixed
 /// playhead from the right (future) and drift past it to the left (already
@@ -79,10 +23,10 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
   static const _basePixelsPerBeat = 70.0;
   static const _endOfTrackPadBeats = 4.0;
 
-  late final List<_PracticeNote> _notes = _flattenNotes(widget.tab);
-  late final List<_MeasureMarker> _measures = _measureMarkers(widget.tab);
-  late final double _totalBeats =
-      _totalBeatsOf(widget.tab) + _endOfTrackPadBeats;
+  late final PracticeTimeline _timeline = PracticeTimeline.fromTab(
+    widget.tab,
+  );
+  late final double _totalBeats = _timeline.totalBeats + _endOfTrackPadBeats;
 
   final ValueNotifier<double> _elapsedBeats = ValueNotifier(0);
   late Ticker _ticker;
@@ -118,7 +62,7 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
   }
 
   void _play() {
-    if (_playing || _notes.isEmpty) return;
+    if (_playing || _timeline.events.isEmpty) return;
     if (_elapsedBeats.value >= _totalBeats) {
       _elapsedBeats.value = 0;
     }
@@ -211,8 +155,8 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
                                               ),
                                               painter: _PracticeTrackPainter(
                                                 stringCount: tab.stringCount,
-                                                notes: _notes,
-                                                measures: _measures,
+                                                events: _timeline.events,
+                                                measures: _timeline.measures,
                                                 elapsedBeats: elapsed,
                                                 pixelsPerBeat:
                                                     _basePixelsPerBeat *
@@ -251,8 +195,8 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
     var current = widget.tab.measures.isEmpty
         ? 0
         : widget.tab.measures.first.number;
-    for (final marker in _measures) {
-      if (marker.beat <= elapsed) {
+    for (final marker in _timeline.measures) {
+      if (marker.startBeat <= elapsed) {
         current = marker.number;
       } else {
         break;
@@ -300,7 +244,7 @@ class _StringLabelColumn extends StatelessWidget {
 class _PracticeTrackPainter extends CustomPainter {
   _PracticeTrackPainter({
     required this.stringCount,
-    required this.notes,
+    required this.events,
     required this.measures,
     required this.elapsedBeats,
     required this.pixelsPerBeat,
@@ -311,8 +255,8 @@ class _PracticeTrackPainter extends CustomPainter {
   });
 
   final int stringCount;
-  final List<_PracticeNote> notes;
-  final List<_MeasureMarker> measures;
+  final List<TimedNoteEvent> events;
+  final List<MeasureMarker> measures;
   final double elapsedBeats;
   final double pixelsPerBeat;
   final double playheadX;
@@ -335,7 +279,7 @@ class _PracticeTrackPainter extends CustomPainter {
       ..strokeWidth = 1;
     final textPainter = TextPainter(textDirection: TextDirection.ltr);
     for (final marker in measures) {
-      final x = playheadX + (marker.beat - elapsedBeats) * pixelsPerBeat;
+      final x = playheadX + (marker.startBeat - elapsedBeats) * pixelsPerBeat;
       if (x < -40 || x > size.width + 40) continue;
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), measurePaint);
       textPainter.text = TextSpan(
@@ -355,15 +299,22 @@ class _PracticeTrackPainter extends CustomPainter {
       playheadPaint,
     );
 
-    const noteWidth = 26.0;
+    const minNoteWidth = 22.0;
     const noteHeight = 20.0;
-    final activeWindow = pixelsPerBeat * 0.18;
-    for (final note in notes) {
-      final x = playheadX + (note.beat - elapsedBeats) * pixelsPerBeat;
-      if (x < -noteWidth || x > size.width + noteWidth) continue;
-      final y = topPadding + (note.stringNumber - 1) * stringSpacing;
-      final active = (x - playheadX).abs() <= activeWindow;
-      final played = x < playheadX - activeWindow;
+    for (final event in events) {
+      final startX =
+          playheadX + (event.startBeat - elapsedBeats) * pixelsPerBeat;
+      final endX = playheadX + (event.endBeat - elapsedBeats) * pixelsPerBeat;
+      if (endX < -minNoteWidth || startX > size.width + minNoteWidth) {
+        continue;
+      }
+      final y = topPadding + (event.stringNumber - 1) * stringSpacing;
+
+      // A note is "active" for as long as it's actually sounding (its
+      // normalized duration), not just a fixed instant at the playhead.
+      final active = elapsedBeats >= event.startBeat &&
+          elapsedBeats <= event.endBeat;
+      final played = elapsedBeats > event.endBeat;
 
       final Color background;
       final Color foreground;
@@ -380,14 +331,15 @@ class _PracticeTrackPainter extends CustomPainter {
         foreground = colorScheme.onSecondaryContainer;
       }
 
+      final width = (endX - startX).clamp(minNoteWidth, double.infinity);
       final rect = RRect.fromRectAndRadius(
-        Rect.fromCenter(center: Offset(x, y), width: noteWidth, height: noteHeight),
+        Rect.fromLTWH(startX, y - noteHeight / 2, width, noteHeight),
         const Radius.circular(5),
       );
       canvas.drawRRect(rect, Paint()..color = background);
 
       textPainter.text = TextSpan(
-        text: '${note.fret}',
+        text: '${event.fret}',
         style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w600,
@@ -398,7 +350,7 @@ class _PracticeTrackPainter extends CustomPainter {
       textPainter.layout();
       textPainter.paint(
         canvas,
-        Offset(x - textPainter.width / 2, y - textPainter.height / 2),
+        Offset(startX + 4, y - textPainter.height / 2),
       );
     }
   }
@@ -407,7 +359,7 @@ class _PracticeTrackPainter extends CustomPainter {
   bool shouldRepaint(covariant _PracticeTrackPainter oldDelegate) =>
       oldDelegate.elapsedBeats != elapsedBeats ||
       oldDelegate.pixelsPerBeat != pixelsPerBeat ||
-      oldDelegate.notes != notes ||
+      oldDelegate.events != events ||
       oldDelegate.measures != measures;
 }
 
