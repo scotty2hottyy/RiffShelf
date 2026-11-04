@@ -1,16 +1,93 @@
 import 'package:flutter/material.dart';
 
-import '../widgets/coming_soon_content.dart';
+import '../core/database/sqlite_tab_repository.dart';
+import '../core/database/tab_repository.dart';
+import '../core/models/saved_tab.dart';
+import '../features/tabs/practice_session_screen.dart';
 
-class PracticeScreen extends StatelessWidget {
-  const PracticeScreen({super.key});
+class PracticeScreen extends StatefulWidget {
+  const PracticeScreen({super.key, this.repository});
+  final TabRepository? repository;
+
+  @override
+  State<PracticeScreen> createState() => _PracticeScreenState();
+}
+
+class _PracticeScreenState extends State<PracticeScreen> {
+  late final TabRepository repository =
+      widget.repository ?? SqliteTabRepository.local();
+  late Future<List<SavedTab>> tabs = repository.findTabs();
+
+  void refresh() => setState(() => tabs = repository.findTabs());
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.repository == null) {
+      SqliteTabRepository.changes.addListener(refresh);
+    }
+  }
+
+  @override
+  void dispose() {
+    if (widget.repository == null) {
+      SqliteTabRepository.changes.removeListener(refresh);
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return const ComingSoonContent(
-      title: 'Practice',
-      icon: Icons.music_note,
-      description: 'Choose a tab and start a practice session.',
+    return FutureBuilder<List<SavedTab>>(
+      future: tabs,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const Center(child: Text('Could not load your library.'));
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: Text('Loading tabs…'));
+        }
+        final results = snapshot.data!;
+        if (results.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'Import or save a tab in your Library to start a practice '
+                'session.',
+                textAlign: TextAlign.center,
+              ),
+            ),
+          );
+        }
+        return ListView.builder(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          itemCount: results.length,
+          itemBuilder: (context, index) {
+            final tab = results[index];
+            return ListTile(
+              leading: Icon(
+                Icons.play_circle_outline,
+                color: tab.hasStructuredContent
+                    ? Theme.of(context).colorScheme.primary
+                    : Theme.of(context).disabledColor,
+              ),
+              title: Text(tab.title),
+              subtitle: Text(
+                '${tab.artist.isEmpty ? 'Unknown artist' : tab.artist} · '
+                '${tab.instrument.label} · ${tab.stringCount} strings'
+                '${tab.hasStructuredContent ? '' : ' · no structured data'}',
+              ),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => PracticeSessionScreen(tab: tab),
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

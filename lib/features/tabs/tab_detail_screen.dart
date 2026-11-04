@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/models/saved_tab.dart';
+import 'practice_session_screen.dart';
 import 'structured_tab_viewer.dart';
 
 class TabDetailScreen extends StatefulWidget {
@@ -16,7 +17,22 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
   Widget build(BuildContext context) {
     final tab = widget.tab;
     return Scaffold(
-      appBar: AppBar(title: Text(tab.title)),
+      appBar: AppBar(
+        title: Text(tab.title),
+        actions: [
+          if (tab.hasStructuredContent)
+            IconButton(
+              tooltip: 'Practice',
+              icon: const Icon(Icons.play_circle_outline),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => PracticeSessionScreen(tab: tab),
+                ),
+              ),
+            ),
+        ],
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(

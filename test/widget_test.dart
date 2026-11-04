@@ -27,17 +27,29 @@ void main() {
 
     await tester.tap(find.text('Practice').last);
     await tester.pumpAndSettle();
-    expect(
-      find.text('Choose a tab and start a practice session.'),
-      findsOneWidget,
+    final emptyPracticeState = find.text(
+      'Import or save a tab in your Library to start a practice session.',
     );
+    // The practice tab lists tabs from the real sqlite database, which
+    // resolves on a real async gap that pumpAndSettle alone doesn't wait
+    // out; runAsync lets that real Future actually complete.
+    await tester.runAsync(() async {
+      for (var i = 0; i < 20 && emptyPracticeState.evaluate().isEmpty; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        await tester.pump();
+      }
+    });
+    expect(emptyPracticeState, findsOneWidget);
     expect(find.text('Practice'), findsWidgets);
 
     await tester.restartAndRestore();
-    expect(
-      find.text('Choose a tab and start a practice session.'),
-      findsOneWidget,
-    );
+    await tester.runAsync(() async {
+      for (var i = 0; i < 20 && emptyPracticeState.evaluate().isEmpty; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        await tester.pump();
+      }
+    });
+    expect(emptyPracticeState, findsOneWidget);
   });
 
   testWidgets('keeps pages mounted when switching tabs', (tester) async {
