@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/models/saved_tab.dart';
-import 'practice_session_screen.dart';
+import 'practice_preparation_screen.dart';
 import 'structured_tab_viewer.dart';
 
 class TabDetailScreen extends StatefulWidget {
@@ -27,7 +27,7 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
               onPressed: () => Navigator.push(
                 context,
                 MaterialPageRoute<void>(
-                  builder: (_) => PracticeSessionScreen(tab: tab),
+                  builder: (_) => PracticePreparationScreen(tab: tab),
                 ),
               ),
             ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:riffshelf/core/models/instrument_type.dart';
 import 'package:riffshelf/core/models/saved_tab.dart';
@@ -178,6 +179,121 @@ void main() {
 
     expect(find.byIcon(Icons.pause), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('whole song wraps at the exact measure boundary', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(home: PracticeSessionScreen(tab: buildTab())),
+    );
+    await tester.tap(find.byKey(const ValueKey('practice-loop-toggle')));
+    await tester.tap(find.byKey(const ValueKey('practice-play-pause')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 8100));
+    expect(find.text('Measure 1 of 4'), findsOneWidget);
+    expect(find.byIcon(Icons.pause), findsOneWidget);
+  });
+
+  testWidgets(
+    'section changes pause, reposition and wrap without extra beats',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(home: PracticeSessionScreen(tab: buildTab())),
+      );
+      await tester.tap(find.byKey(const ValueKey('practice-play-pause')));
+      await tester.pump();
+      tester
+          .widget<RangeSlider>(
+            find.byKey(const ValueKey('practice-section-slider')),
+          )
+          .onChanged!(const RangeValues(1, 2));
+      await tester.pump();
+      expect(find.text('Measure 2 of 4'), findsOneWidget);
+      expect(find.byIcon(Icons.play_arrow), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('practice-loop-toggle')));
+      await tester.tap(find.byKey(const ValueKey('practice-play-pause')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 4100));
+      expect(find.text('Measure 2 of 4'), findsOneWidget);
+      expect(find.byIcon(Icons.pause), findsOneWidget);
+    },
+  );
+
+  testWidgets('a non-looping section stops before the following measure', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: PracticeSessionScreen(tab: buildTab())),
+    );
+    tester
+        .widget<RangeSlider>(
+          find.byKey(const ValueKey('practice-section-slider')),
+        )
+        .onChanged!(const RangeValues(1, 2));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('practice-play-pause')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 3900));
+    expect(find.byIcon(Icons.pause), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byIcon(Icons.play_arrow), findsOneWidget);
+    // The playhead is exactly at the boundary, not four beats beyond it.
+    await tester.tap(find.byKey(const ValueKey('practice-play-pause')));
+    await tester.pump();
+    expect(find.text('Measure 2 of 4'), findsOneWidget);
+  });
+
+  testWidgets('background pauses and resume does not advance the position', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: PracticeSessionScreen(tab: buildTab())),
+    );
+    await tester.tap(find.byKey(const ValueKey('practice-play-pause')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 2500));
+    expect(find.text('Measure 2 of 4'), findsOneWidget);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump(const Duration(seconds: 10));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(find.byIcon(Icons.play_arrow), findsOneWidget);
+    expect(find.text('Measure 2 of 4'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('practice-play-pause')));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Measure 2 of 4'), findsOneWidget);
+  });
+
+  testWidgets('metronome clicks once at a loop boundary', (tester) async {
+    final sounds = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'SystemSound.play') sounds.add(call);
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: PracticeSessionScreen(tab: buildTab())),
+    );
+    await tester.tap(find.byKey(const ValueKey('practice-loop-toggle')));
+    await tester.tap(find.byKey(const ValueKey('practice-metronome-toggle')));
+    await tester.tap(find.byKey(const ValueKey('practice-play-pause')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 7900));
+    sounds.clear();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(sounds, hasLength(1));
+    expect(sounds.single.arguments, 'SystemSoundType.alert');
+    await tester.tap(find.byKey(const ValueKey('practice-play-pause')));
+    await tester.pump(const Duration(milliseconds: 150));
   });
 
   testWidgets('without looping, playback pauses once it reaches the end', (

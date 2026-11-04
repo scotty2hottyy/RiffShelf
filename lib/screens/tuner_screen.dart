@@ -5,7 +5,10 @@ import '../features/tuner/audio_input.dart';
 import '../features/tuner/tuner_controller.dart';
 
 class TunerScreen extends StatefulWidget {
-  const TunerScreen({super.key, this.inputFactory});
+  const TunerScreen({super.key, this.inputFactory, this.preset});
+
+  /// A fixed arrangement tuning; null keeps the standalone preset picker.
+  final TuningPreset? preset;
 
   /// Overrides the microphone source (used by tests).
   final TunerAudioInput Function()? inputFactory;
@@ -17,7 +20,7 @@ class TunerScreen extends StatefulWidget {
 class _TunerScreenState extends State<TunerScreen> with WidgetsBindingObserver {
   late final TunerController _controller = TunerController(
     input: (widget.inputFactory ?? RecordAudioInput.new)(),
-  );
+  )..preset = widget.preset ?? TunerPresets.guitarStandard;
 
   @override
   void initState() {
@@ -55,7 +58,10 @@ class _TunerScreenState extends State<TunerScreen> with WidgetsBindingObserver {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _PresetPicker(controller: _controller),
+                if (widget.preset == null)
+                  _PresetPicker(controller: _controller)
+                else
+                  Text(widget.preset!.name),
                 const SizedBox(height: 20),
                 _MeterCard(controller: _controller),
                 const SizedBox(height: 16),
@@ -166,6 +172,21 @@ class _MeterCard extends StatelessWidget {
           LayoutBuilder(
             builder: (context, constraints) {
               final notes = controller.preset.notes;
+              if (notes.length > 6) {
+                return Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final note in notes)
+                      _StringBadge(
+                        note: note,
+                        active: reading?.targetNote == note,
+                        color: color,
+                      ),
+                  ],
+                );
+              }
               Widget row(List<String> rowNotes, String key) => Row(
                 key: Key(key),
                 mainAxisAlignment: MainAxisAlignment.center,
