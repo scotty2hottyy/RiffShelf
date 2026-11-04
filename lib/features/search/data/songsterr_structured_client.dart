@@ -65,7 +65,10 @@ class SongsterrStructuredClient {
       'https://d34shlm8p2ums2.cloudfront.net',
       'https://d3cqchs6g3b5ew.cloudfront.net',
     ],
-    this.headers = const {'Accept': 'application/json'},
+    this.headers = const {
+      'Accept': 'application/json',
+      'User-Agent': 'RiffShelf/1.0',
+    },
   });
 
   final http.Client _client;

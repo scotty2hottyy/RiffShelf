@@ -126,6 +126,8 @@ void main() {
           paths.add(request.url.path);
           expect(request.url.queryParameters['pattern'], 'song');
           expect(request.url.queryParameters['size'], '50');
+          expect(request.headers['user-agent'], 'RiffShelf/1.0');
+          expect(request.headers['accept'], 'application/json');
           return http.Response(songs, 200);
         }),
       );
@@ -171,18 +173,27 @@ void main() {
       final provider = SongsterrProvider(
         client: MockClient((request) async {
           paths.add(request.url.path);
-          return http.Response('Unavailable', 503);
+          return http.Response(
+            'Unavailable',
+            request.url.path == '/api/songs' ? 403 : 404,
+          );
         }),
       );
 
       await expectLater(
         provider.search(query),
         throwsA(
-          isA<SongsterrException>().having(
-            (error) => error.failure,
-            'failure',
-            SongsterrFailure.httpError,
-          ),
+          isA<SongsterrException>()
+              .having(
+                (error) => error.failure,
+                'failure',
+                SongsterrFailure.httpError,
+              )
+              .having(
+                (error) => error.message,
+                'message',
+                contains('search: HTTP 403; fallback: HTTP 404'),
+              ),
         ),
       );
       expect(paths, ['/api/songs', '/a/ra/songs.json']);
