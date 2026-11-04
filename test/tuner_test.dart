@@ -4,25 +4,39 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:riffshelf/core/models/tuning.dart';
 import 'package:riffshelf/features/tuner/audio_input.dart';
 import 'package:riffshelf/features/tuner/pitch_detector.dart';
+import 'package:riffshelf/features/tuner/tuner_controller.dart';
 import 'package:riffshelf/screens/tuner_screen.dart';
 
 class FakeInput implements TunerAudioInput {
   FakeInput(this.status);
   final MicrophoneStatus status;
   final controller = StreamController<Uint8List>();
+  int starts = 0;
+  int stops = 0;
+  int disposals = 0;
 
   @override
   int get sampleRate => 22050;
   @override
   Future<MicrophoneStatus> prepare() async => status;
   @override
-  Future<Stream<Uint8List>> start() async => controller.stream;
+  Future<Stream<Uint8List>> start() async {
+    starts++;
+    return controller.stream;
+  }
+
   @override
-  Future<void> stop() async {}
+  Future<void> stop() async {
+    stops++;
+  }
+
   @override
-  Future<void> dispose() async {}
+  Future<void> dispose() async {
+    disposals++;
+  }
 }
 
 Float64List sine(double hz, int n, int rate) => Float64List.fromList([
@@ -35,6 +49,10 @@ Uint8List pcm(Float64List samples) {
     data.setInt16(i * 2, (samples[i] * 32767).round(), Endian.little);
   }
   return data.buffer.asUint8List();
+}
+
+void emitPitch(FakeInput input, double hz) {
+  input.controller.add(pcm(sine(hz, 22050, input.sampleRate)));
 }
 
 void main() {
@@ -133,6 +151,7 @@ void main() {
 
       final samples = sine(110.0, 22050, 22050);
       input.controller.add(pcm(samples));
+      input.controller.add(pcm(samples));
       await tester.pump(const Duration(milliseconds: 10));
 
       expect(
@@ -142,5 +161,139 @@ void main() {
       await tester.tap(find.text('Stop'));
       await tester.pumpAndSettle();
     });
+
+    testWidgets('locks a string and returns to automatic detection', (
+      tester,
+    ) async {
+      final input = FakeInput(MicrophoneStatus.available);
+      await pumpTuner(tester, input);
+      await tester.tap(find.byKey(const Key('tuner-string-E4')));
+      await tester.pump();
+      expect(
+        tester.widget<Text>(find.byKey(const Key('tuner-target-note'))).data,
+        'E4',
+      );
+      expect(find.text('Automatic detection'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Start tuning'));
+      await tester.tap(find.text('Start tuning'));
+      await tester.pump();
+      emitPitch(input, 110);
+      emitPitch(input, 110);
+      await tester.pump();
+      expect(find.textContaining('Detected A2'), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('tuner-target-note'))).data,
+        'E4',
+      );
+
+      await tester.ensureVisible(find.byKey(const Key('tuner-automatic')));
+      await tester.tap(find.byKey(const Key('tuner-automatic')));
+      await tester.pump();
+      emitPitch(input, 110);
+      emitPitch(input, 110);
+      await tester.pump();
+      expect(
+        tester.widget<Text>(find.byKey(const Key('tuner-target-note'))).data,
+        'A2',
+      );
+    });
+
+    testWidgets('releases the microphone when the screen is disposed', (tester) async {
+      final input = FakeInput(MicrophoneStatus.available);
+      await pumpTuner(tester, input);
+      await tester.tap(find.text('Start tuning'));
+      await tester.pump();
+      expect(input.starts, 1);
+      await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+      await tester.pump();
+      expect(input.stops, greaterThan(0));
+      expect(input.disposals, 1);
+    });
+  });
+
+  group('TunerController', () {
+    test('maps guitar and bass pitch, cents, and intonation', () async {
+      final input = FakeInput(MicrophoneStatus.available);
+      final tuner = TunerController(input: input);
+      await tuner.start();
+      for (final (preset, frequency, target, cents) in [
+        (TunerPresets.guitarStandard, 110.0, 'A2', 0.0),
+        (TunerPresets.guitarStandard, 110 * math.pow(2, 12 / 1200), 'A2', 12.0),
+        (
+          TunerPresets.bassStandard,
+          41.2034 * math.pow(2, -15 / 1200),
+          'E1',
+          -15.0,
+        ),
+      ]) {
+        tuner.preset = preset;
+        emitPitch(input, frequency.toDouble());
+        emitPitch(input, frequency.toDouble());
+        await Future<void>.delayed(Duration.zero);
+        expect(tuner.reading?.targetNote, target);
+        expect(tuner.reading!.targetCents, closeTo(cents, 2));
+        expect(tuner.reading!.inTune, cents.abs() <= 5);
+      }
+      await tuner.stop();
+      tuner.dispose();
+    });
+
+    test('rejects silence, noise, and alternating pitches', () async {
+      final input = FakeInput(MicrophoneStatus.available);
+      final tuner = TunerController(input: input);
+      await tuner.start();
+      emitPitch(input, 110);
+      await Future<void>.delayed(Duration.zero);
+      expect(tuner.reading, isNull);
+      emitPitch(input, 146.83);
+      await Future<void>.delayed(Duration.zero);
+      expect(tuner.reading, isNull);
+      emitPitch(input, 110);
+      await Future<void>.delayed(Duration.zero);
+      expect(tuner.reading, isNull);
+      emitPitch(input, 110);
+      await Future<void>.delayed(Duration.zero);
+      expect(tuner.reading, isNotNull);
+      input.controller.add(pcm(Float64List(22050)));
+      await Future<void>.delayed(Duration.zero);
+      expect(tuner.reading, isNull);
+      var seed = 1;
+      final noise = Float64List.fromList(
+        List.generate(22050, (_) {
+          seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+          return (seed / 0x7fffffff - 0.5) * 0.4;
+        }),
+      );
+      input.controller.add(pcm(noise));
+      input.controller.add(pcm(noise));
+      await Future<void>.delayed(Duration.zero);
+      expect(tuner.reading, isNull);
+      await tuner.stop();
+      tuner.dispose();
+    });
+
+    test(
+      'permission denial does not start capture; stop and dispose release it',
+      () async {
+        final denied = FakeInput(MicrophoneStatus.permissionDenied);
+        final blocked = TunerController(input: denied);
+        await blocked.start();
+        expect(blocked.status, TunerStatus.permissionDenied);
+        expect(denied.starts, 0);
+        blocked.dispose();
+
+        final input = FakeInput(MicrophoneStatus.available);
+        final tuner = TunerController(input: input);
+        await tuner.start();
+        expect(input.starts, 1);
+        await tuner.stop();
+        expect(input.stops, greaterThan(0));
+        expect(tuner.reading, isNull);
+        tuner.dispose();
+        await Future<void>.delayed(Duration.zero);
+        expect(input.disposals, 1);
+      },
+    );
   });
 }

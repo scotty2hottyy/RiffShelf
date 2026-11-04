@@ -29,7 +29,7 @@ class TunerReading {
   /// Chromatic note nearest to the detected pitch.
   final NoteMatch note;
 
-  /// The preset string closest to the detected pitch.
+  /// The selected preset string, or the closest one in automatic mode.
   final String targetNote;
 
   /// Cents offset from [targetNote]; positive means sharp.
@@ -48,7 +48,8 @@ class TunerController extends ChangeNotifier {
   }
 
   static const _analysisInterval = Duration(milliseconds: 80);
-  static const _holdDuration = Duration(milliseconds: 700);
+  static const _minimumConfidence = 0.85;
+  static const _stableCents = 45.0;
 
   final TunerAudioInput _input;
   final PitchDetector _detector;
@@ -61,18 +62,34 @@ class TunerController extends ChangeNotifier {
   int _sinceAnalysis = 0;
   int _session = 0;
   bool _disposed = false;
-  Timer? _holdTimer;
+  double? _candidateFrequency;
+  int _candidateFrames = 0;
+  int? _selectedStringIndex;
   int? _carryByte;
 
   TunerStatus get status => _status;
   TunerReading? get reading => _reading;
   TuningPreset get preset => _preset;
+  int? get selectedStringIndex => _selectedStringIndex;
   bool get isListening => _status == TunerStatus.listening;
+
+  void selectString(int? index) {
+    if (index != null && (index < 0 || index >= _preset.notes.length)) {
+      throw RangeError.index(index, _preset.notes);
+    }
+    if (_selectedStringIndex == index) return;
+    _selectedStringIndex = index;
+    _reading = null;
+    _resetCandidate();
+    _notify();
+  }
 
   set preset(TuningPreset value) {
     if (identical(value, _preset)) return;
     _preset = value;
+    _selectedStringIndex = null;
     _reading = null;
+    _resetCandidate();
     _notify();
   }
 
@@ -105,6 +122,8 @@ class TunerController extends ChangeNotifier {
       _filled = 0;
       _sinceAnalysis = 0;
       _carryByte = null;
+      _window.fillRange(0, _window.length, 0);
+      _resetCandidate();
       _subscription = stream.listen(
         _onAudio,
         onError: (_) => _fail(session),
@@ -135,9 +154,8 @@ class TunerController extends ChangeNotifier {
   }
 
   Future<void> _teardown() async {
-    _holdTimer?.cancel();
-    _holdTimer = null;
     _reading = null;
+    _resetCandidate();
     final subscription = _subscription;
     _subscription = null;
     await subscription?.cancel();
@@ -182,20 +200,31 @@ class TunerController extends ChangeNotifier {
 
   void _analyze() {
     final pitch = _detector.detect(_window);
-    if (pitch == null) {
-      _holdTimer ??= Timer(_holdDuration, () {
-        _holdTimer = null;
-        _reading = null;
-        _notify();
-      });
+    if (pitch == null ||
+        !pitch.frequency.isFinite ||
+        pitch.confidence < _minimumConfidence) {
+      _resetCandidate();
+      _clearReading();
       return;
     }
-    _holdTimer?.cancel();
-    _holdTimer = null;
 
-    String? bestNote;
+    if (_candidateFrequency == null ||
+        centsBetween(pitch.frequency, _candidateFrequency!).abs() >
+            _stableCents) {
+      _candidateFrequency = pitch.frequency;
+      _candidateFrames = 1;
+      _clearReading();
+      return;
+    }
+    _candidateFrequency = pitch.frequency;
+    _candidateFrames++;
+    if (_candidateFrames < 2) return;
+
+    String? bestNote = _selectedStringIndex == null
+        ? null
+        : _preset.notes[_selectedStringIndex!];
     double bestCents = double.infinity;
-    for (final name in _preset.notes) {
+    for (final name in bestNote == null ? _preset.notes : [bestNote]) {
       final midi = midiFromNoteName(name);
       if (midi == null) continue;
       final cents = centsBetween(pitch.frequency, frequencyFromMidi(midi));
@@ -215,6 +244,17 @@ class TunerController extends ChangeNotifier {
     _notify();
   }
 
+  void _resetCandidate() {
+    _candidateFrequency = null;
+    _candidateFrames = 0;
+  }
+
+  void _clearReading() {
+    if (_reading == null) return;
+    _reading = null;
+    _notify();
+  }
+
   void _setStatus(TunerStatus status) {
     _status = status;
     _notify();
@@ -228,7 +268,6 @@ class TunerController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _session++;
-    _holdTimer?.cancel();
     final subscription = _subscription;
     _subscription = null;
     subscription?.cancel();

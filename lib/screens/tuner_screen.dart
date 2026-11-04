@@ -125,7 +125,9 @@ class _MeterCard extends StatelessWidget {
       child: Column(
         children: [
           Text(
-            reading?.targetNote ?? '--',
+            controller.selectedStringIndex == null
+                ? reading?.targetNote ?? '--'
+                : controller.preset.notes[controller.selectedStringIndex!],
             key: const Key('tuner-target-note'),
             style: theme.textTheme.displayLarge?.copyWith(
               color: color,
@@ -135,7 +137,8 @@ class _MeterCard extends StatelessWidget {
           Text(
             reading == null
                 ? 'Play a string'
-                : '${reading.frequency.toStringAsFixed(1)} Hz · '
+                : 'Detected ${reading.note.label} · '
+                      '${reading.frequency.toStringAsFixed(1)} Hz · '
                       '${reading.targetCents >= 0 ? '+' : ''}'
                       '${reading.targetCents.toStringAsFixed(0)} cents',
             key: const Key('tuner-readout'),
@@ -162,13 +165,26 @@ class _MeterCard extends StatelessWidget {
             children: [
               Text('Flat', style: theme.textTheme.labelSmall),
               Text(
-                reading?.inTune == true ? 'In tune' : '',
+                reading == null
+                    ? ''
+                    : reading.inTune
+                    ? 'In tune'
+                    : reading.targetCents < 0
+                    ? 'Flat'
+                    : 'Sharp',
+                key: const Key('tuner-intonation'),
                 style: theme.textTheme.labelMedium?.copyWith(color: accent),
               ),
               Text('Sharp', style: theme.textTheme.labelSmall),
             ],
           ),
           const SizedBox(height: 20),
+          if (controller.selectedStringIndex != null)
+            TextButton(
+              key: const Key('tuner-automatic'),
+              onPressed: () => controller.selectString(null),
+              child: const Text('Automatic detection'),
+            ),
           LayoutBuilder(
             builder: (context, constraints) {
               final notes = controller.preset.notes;
@@ -178,16 +194,20 @@ class _MeterCard extends StatelessWidget {
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    for (final note in notes)
+                    for (var index = 0; index < notes.length; index++)
                       _StringBadge(
-                        note: note,
-                        active: reading?.targetNote == note,
+                        note: notes[index],
+                        active:
+                            controller.selectedStringIndex == index ||
+                            (controller.selectedStringIndex == null &&
+                                reading?.targetNote == notes[index]),
                         color: color,
+                        onTap: () => controller.selectString(index),
                       ),
                   ],
                 );
               }
-              Widget row(List<String> rowNotes, String key) => Row(
+              Widget row(List<String> rowNotes, int start, String key) => Row(
                 key: Key(key),
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -195,8 +215,12 @@ class _MeterCard extends StatelessWidget {
                     if (index > 0) const SizedBox(width: 8),
                     _StringBadge(
                       note: rowNotes[index],
-                      active: reading?.targetNote == rowNotes[index],
+                      active:
+                          controller.selectedStringIndex == start + index ||
+                          (controller.selectedStringIndex == null &&
+                              reading?.targetNote == rowNotes[index]),
                       color: color,
+                      onTap: () => controller.selectString(start + index),
                     ),
                   ],
                 ],
@@ -204,13 +228,13 @@ class _MeterCard extends StatelessWidget {
               if (notes.length == 6 && constraints.maxWidth < 316) {
                 return Column(
                   children: [
-                    row(notes.sublist(0, 3), 'tuner-strings-first-row'),
+                    row(notes.sublist(0, 3), 0, 'tuner-strings-first-row'),
                     const SizedBox(height: 8),
-                    row(notes.sublist(3), 'tuner-strings-second-row'),
+                    row(notes.sublist(3), 3, 'tuner-strings-second-row'),
                   ],
                 );
               }
-              return row(notes, 'tuner-strings-single-row');
+              return row(notes, 0, 'tuner-strings-single-row');
             },
           ),
         ],
@@ -224,25 +248,32 @@ class _StringBadge extends StatelessWidget {
     required this.note,
     required this.active,
     required this.color,
+    required this.onTap,
   });
   final String note;
   final bool active;
   final Color color;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 46,
-      height: 46,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: active ? color.withValues(alpha: 0.18) : null,
-        border: Border.all(
-          color: active ? color : Theme.of(context).dividerColor,
+    return InkWell(
+      key: Key('tuner-string-$note'),
+      onTap: onTap,
+      customBorder: const CircleBorder(),
+      child: Container(
+        width: 46,
+        height: 46,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: active ? color.withValues(alpha: 0.18) : null,
+          border: Border.all(
+            color: active ? color : Theme.of(context).dividerColor,
+          ),
         ),
+        child: Text(note, style: const TextStyle(fontWeight: FontWeight.w600)),
       ),
-      child: Text(note, style: const TextStyle(fontWeight: FontWeight.w600)),
     );
   }
 }
