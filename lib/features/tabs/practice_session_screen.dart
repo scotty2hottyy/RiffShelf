@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/models/saved_tab.dart';
 import 'practice_timeline.dart';
@@ -32,8 +33,52 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
   late Ticker _ticker;
   Duration _lastTick = Duration.zero;
   bool _playing = false;
-  late double _bpm = (widget.tab.bpm ?? 100).toDouble().clamp(20, 300);
+  bool _looping = false;
+  bool _metronome = false;
+  final ValueNotifier<bool> _metronomeFlash = ValueNotifier(false);
+
+  // "Speed" is a percentage of the tab's own authored tempo (or 100 BPM if
+  // none was recorded), rather than a raw BPM value, so practicing slower
+  // never requires knowing or fiddling with absolute tempo numbers.
+  late final double _baseBpm = (widget.tab.bpm ?? 100).toDouble().clamp(
+    20,
+    300,
+  );
+  double _speedPercent = 100;
+  double get _bpm => (_baseBpm * _speedPercent / 100).clamp(10, 400);
+
+  // The practice "section": a measure range to loop over. Defaults to the
+  // whole song (first measure through the last).
+  late RangeValues _sectionIndexRange = RangeValues(
+    0,
+    (_timeline.measures.length - 1).clamp(0, double.infinity).toDouble(),
+  );
   double _scale = 1;
+
+  int get _measureCount => _timeline.measures.length;
+
+  bool get _isWholeSongSelected =>
+      _measureCount == 0 ||
+      (_sectionIndexRange.start <= 0 &&
+          _sectionIndexRange.end >= _measureCount - 1);
+
+  double get _loopStartBeat {
+    if (_measureCount == 0) return 0;
+    final index = _sectionIndexRange.start.round().clamp(
+      0,
+      _measureCount - 1,
+    );
+    return _timeline.measures[index].startBeat;
+  }
+
+  double get _loopEndBeat {
+    if (_measureCount == 0) return _totalBeats;
+    final index = _sectionIndexRange.end.round().clamp(0, _measureCount - 1);
+    final base = index + 1 < _measureCount
+        ? _timeline.measures[index + 1].startBeat
+        : _timeline.totalBeats;
+    return base + _endOfTrackPadBeats;
+  }
 
   @override
   void initState() {
@@ -45,26 +90,65 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
   void dispose() {
     _ticker.dispose();
     _elapsedBeats.dispose();
+    _metronomeFlash.dispose();
     super.dispose();
   }
 
   void _onTick(Duration elapsed) {
     final dt = elapsed - _lastTick;
     _lastTick = elapsed;
-    final next =
-        _elapsedBeats.value + dt.inMicroseconds / 1e6 * (_bpm / 60);
-    if (next >= _totalBeats) {
-      _elapsedBeats.value = _totalBeats;
-      _pause();
-    } else {
-      _elapsedBeats.value = next;
+    final previous = _elapsedBeats.value;
+    final loopStart = _loopStartBeat;
+    final loopEnd = _loopEndBeat;
+    final rawNext = previous + dt.inMicroseconds / 1e6 * (_bpm / 60);
+
+    if (rawNext < loopEnd) {
+      _fireMetronomeTicks(previous, rawNext);
+      _elapsedBeats.value = rawNext;
+      return;
     }
+
+    _fireMetronomeTicks(previous, loopEnd);
+    if (_looping && loopEnd > loopStart) {
+      final regionLength = loopEnd - loopStart;
+      final wrapped = loopStart + (rawNext - loopEnd) % regionLength;
+      // The loop point is itself a beat boundary (a measure start); make
+      // sure its click fires even though playback jumps straight past it.
+      _fireMetronomeTicks(loopStart - 0.001, wrapped);
+      _elapsedBeats.value = wrapped;
+    } else {
+      _elapsedBeats.value = loopEnd;
+      _pause();
+    }
+  }
+
+  void _fireMetronomeTicks(double from, double to) {
+    if (!_metronome || to <= from) return;
+    var beat = from.floor() + 1;
+    while (beat <= to) {
+      _clickMetronome(beat.toDouble());
+      beat++;
+    }
+  }
+
+  void _clickMetronome(double beat) {
+    final isDownbeat = _timeline.measures.any(
+      (marker) => (marker.startBeat - beat).abs() < 0.05,
+    );
+    SystemSound.play(isDownbeat ? SystemSoundType.alert : SystemSoundType.click);
+    HapticFeedback.selectionClick();
+    _metronomeFlash.value = true;
+    Future<void>.delayed(const Duration(milliseconds: 90), () {
+      if (mounted) _metronomeFlash.value = false;
+    });
   }
 
   void _play() {
     if (_playing || _timeline.events.isEmpty) return;
-    if (_elapsedBeats.value >= _totalBeats) {
-      _elapsedBeats.value = 0;
+    final start = _loopStartBeat;
+    final end = _loopEndBeat;
+    if (_elapsedBeats.value < start || _elapsedBeats.value >= end) {
+      _elapsedBeats.value = start;
     }
     _lastTick = Duration.zero;
     _ticker.start();
@@ -79,9 +163,25 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
 
   void _restart() {
     _ticker.stop();
-    _elapsedBeats.value = 0;
+    _elapsedBeats.value = _loopStartBeat;
     if (_playing) setState(() => _playing = false);
   }
+
+  void _toggleLoop() => setState(() => _looping = !_looping);
+
+  void _toggleMetronome() => setState(() => _metronome = !_metronome);
+
+  void _onSpeedChanged(double value) => setState(() => _speedPercent = value);
+
+  void _onSectionChanged(RangeValues value) =>
+      setState(() => _sectionIndexRange = value);
+
+  void _resetSection() => setState(() {
+    _sectionIndexRange = RangeValues(
+      0,
+      (_measureCount - 1).clamp(0, double.infinity).toDouble(),
+    );
+  });
 
   void _seekByPixels(double dx) {
     if (_playing) _pause();
@@ -115,15 +215,51 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                  child: ValueListenableBuilder<double>(
-                    valueListenable: _elapsedBeats,
-                    builder: (context, elapsed, _) => Text(
-                      'Measure ${_currentMeasureNumber(elapsed)} of '
-                      '${tab.measures.isEmpty ? 0 : tab.measures.last.number}',
-                      style: theme.textTheme.labelLarge,
-                    ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: ValueListenableBuilder<double>(
+                          valueListenable: _elapsedBeats,
+                          builder: (context, elapsed, _) => Text(
+                            'Measure ${_currentMeasureNumber(elapsed)} of '
+                            '${tab.measures.isEmpty ? 0 : tab.measures.last.number}',
+                            style: theme.textTheme.labelLarge,
+                          ),
+                        ),
+                      ),
+                      if (_metronome)
+                        ValueListenableBuilder<bool>(
+                          key: const ValueKey('practice-metronome-flash'),
+                          valueListenable: _metronomeFlash,
+                          builder: (context, flashing, _) => AnimatedContainer(
+                            duration: const Duration(milliseconds: 80),
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: flashing
+                                  ? theme.colorScheme.primary
+                                  : theme.colorScheme.outlineVariant,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
+                if (_measureCount > 1)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                    child: _SectionRangeControl(
+                      range: _sectionIndexRange,
+                      measureCount: _measureCount,
+                      measureNumbers: _timeline.measures
+                          .map((marker) => marker.number)
+                          .toList(),
+                      isWholeSong: _isWholeSongSelected,
+                      onChanged: _onSectionChanged,
+                      onReset: _resetSection,
+                    ),
+                  ),
                 Expanded(
                   child: Center(
                     child: SizedBox(
@@ -165,6 +301,15 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
                                                 stringSpacing: stringSpacing,
                                                 topPadding: _topPadding,
                                                 colorScheme: theme.colorScheme,
+                                                sectionStartBeat:
+                                                    _isWholeSongSelected
+                                                    ? null
+                                                    : _loopStartBeat,
+                                                sectionEndBeat:
+                                                    _isWholeSongSelected
+                                                    ? null
+                                                    : _loopEndBeat -
+                                                          _endOfTrackPadBeats,
                                               ),
                                             ),
                                       ),
@@ -179,11 +324,16 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
                 ),
                 _PracticeControls(
                   playing: _playing,
-                  bpm: _bpm,
+                  looping: _looping,
+                  metronome: _metronome,
+                  speedPercent: _speedPercent,
+                  effectiveBpm: _bpm,
                   scale: _scale,
                   onPlayPause: () => _playing ? _pause() : _play(),
                   onRestart: _restart,
-                  onBpmChanged: (value) => setState(() => _bpm = value),
+                  onToggleLoop: _toggleLoop,
+                  onToggleMetronome: _toggleMetronome,
+                  onSpeedChanged: _onSpeedChanged,
                   onScaleChanged: (value) => setState(() => _scale = value),
                 ),
               ],
@@ -203,6 +353,65 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
       }
     }
     return current;
+  }
+}
+
+/// A "practice a section" control: lets the player restrict (and loop) the
+/// track to a contiguous range of measures instead of the whole song.
+class _SectionRangeControl extends StatelessWidget {
+  const _SectionRangeControl({
+    required this.range,
+    required this.measureCount,
+    required this.measureNumbers,
+    required this.isWholeSong,
+    required this.onChanged,
+    required this.onReset,
+  });
+
+  final RangeValues range;
+  final int measureCount;
+  final List<int> measureNumbers;
+  final bool isWholeSong;
+  final ValueChanged<RangeValues> onChanged;
+  final VoidCallback onReset;
+
+  @override
+  Widget build(BuildContext context) {
+    final startMeasure =
+        measureNumbers[range.start.round().clamp(0, measureCount - 1)];
+    final endMeasure =
+        measureNumbers[range.end.round().clamp(0, measureCount - 1)];
+    return Row(
+      children: [
+        const Icon(Icons.view_week_outlined, size: 18),
+        Expanded(
+          child: RangeSlider(
+            key: const ValueKey('practice-section-slider'),
+            values: range,
+            min: 0,
+            max: (measureCount - 1).toDouble(),
+            divisions: measureCount - 1,
+            labels: RangeLabels('$startMeasure', '$endMeasure'),
+            onChanged: onChanged,
+          ),
+        ),
+        SizedBox(
+          width: 92,
+          child: Text(
+            isWholeSong ? 'Whole song' : 'M$startMeasure–$endMeasure',
+            textAlign: TextAlign.end,
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+        ),
+        IconButton(
+          key: const ValueKey('practice-section-reset'),
+          tooltip: 'Practice whole song',
+          visualDensity: VisualDensity.compact,
+          onPressed: isWholeSong ? null : onReset,
+          icon: const Icon(Icons.clear, size: 18),
+        ),
+      ],
+    );
   }
 }
 
@@ -252,6 +461,8 @@ class _PracticeTrackPainter extends CustomPainter {
     required this.stringSpacing,
     required this.topPadding,
     required this.colorScheme,
+    this.sectionStartBeat,
+    this.sectionEndBeat,
   });
 
   final int stringCount;
@@ -264,8 +475,37 @@ class _PracticeTrackPainter extends CustomPainter {
   final double topPadding;
   final ColorScheme colorScheme;
 
+  /// When set, highlights the selected practice section (a measure range)
+  /// on the track, in beats, without the end-of-track padding.
+  final double? sectionStartBeat;
+  final double? sectionEndBeat;
+
   @override
   void paint(Canvas canvas, Size size) {
+    final sectionStart = sectionStartBeat;
+    final sectionEnd = sectionEndBeat;
+    if (sectionStart != null && sectionEnd != null) {
+      final left =
+          playheadX + (sectionStart - elapsedBeats) * pixelsPerBeat;
+      final right = playheadX + (sectionEnd - elapsedBeats) * pixelsPerBeat;
+      final clampedLeft = left.clamp(0.0, size.width);
+      final clampedRight = right.clamp(0.0, size.width);
+      if (clampedRight > clampedLeft) {
+        canvas.drawRect(
+          Rect.fromLTRB(clampedLeft, 0, clampedRight, size.height),
+          Paint()..color = colorScheme.tertiary.withValues(alpha: 0.08),
+        );
+      }
+      final boundaryPaint = Paint()
+        ..color = colorScheme.tertiary
+        ..strokeWidth = 2;
+      for (final x in [left, right]) {
+        if (x >= -2 && x <= size.width + 2) {
+          canvas.drawLine(Offset(x, 0), Offset(x, size.height), boundaryPaint);
+        }
+      }
+    }
+
     final stringPaint = Paint()
       ..color = colorScheme.outlineVariant
       ..strokeWidth = 1;
@@ -360,29 +600,42 @@ class _PracticeTrackPainter extends CustomPainter {
       oldDelegate.elapsedBeats != elapsedBeats ||
       oldDelegate.pixelsPerBeat != pixelsPerBeat ||
       oldDelegate.events != events ||
-      oldDelegate.measures != measures;
+      oldDelegate.measures != measures ||
+      oldDelegate.sectionStartBeat != sectionStartBeat ||
+      oldDelegate.sectionEndBeat != sectionEndBeat;
 }
 
 class _PracticeControls extends StatelessWidget {
   const _PracticeControls({
     required this.playing,
-    required this.bpm,
+    required this.looping,
+    required this.metronome,
+    required this.speedPercent,
+    required this.effectiveBpm,
     required this.scale,
     required this.onPlayPause,
     required this.onRestart,
-    required this.onBpmChanged,
+    required this.onToggleLoop,
+    required this.onToggleMetronome,
+    required this.onSpeedChanged,
     required this.onScaleChanged,
   });
   final bool playing;
-  final double bpm;
+  final bool looping;
+  final bool metronome;
+  final double speedPercent;
+  final double effectiveBpm;
   final double scale;
   final VoidCallback onPlayPause;
   final VoidCallback onRestart;
-  final ValueChanged<double> onBpmChanged;
+  final VoidCallback onToggleLoop;
+  final VoidCallback onToggleMetronome;
+  final ValueChanged<double> onSpeedChanged;
   final ValueChanged<double> onScaleChanged;
 
   @override
   Widget build(BuildContext context) {
+    final accent = Theme.of(context).colorScheme.primary;
     return SafeArea(
       top: false,
       child: Padding(
@@ -403,29 +656,46 @@ class _PracticeControls extends StatelessWidget {
                   onPressed: onPlayPause,
                   icon: Icon(playing ? Icons.pause : Icons.play_arrow),
                 ),
-                const SizedBox(width: 12),
+                IconButton(
+                  key: const ValueKey('practice-loop-toggle'),
+                  tooltip: looping ? 'Loop on' : 'Loop off',
+                  onPressed: onToggleLoop,
+                  icon: Icon(
+                    Icons.repeat,
+                    color: looping ? accent : null,
+                  ),
+                ),
+                IconButton(
+                  key: const ValueKey('practice-metronome-toggle'),
+                  tooltip: metronome ? 'Metronome on' : 'Metronome off',
+                  onPressed: onToggleMetronome,
+                  icon: Icon(
+                    Icons.av_timer,
+                    color: metronome ? accent : null,
+                  ),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                const Icon(Icons.speed, size: 18),
                 Expanded(
-                  child: Row(
-                    children: [
-                      const Icon(Icons.speed, size: 18),
-                      Expanded(
-                        child: Slider(
-                          value: bpm,
-                          min: 20,
-                          max: 300,
-                          divisions: 280,
-                          label: '${bpm.round()} BPM',
-                          onChanged: onBpmChanged,
-                        ),
-                      ),
-                      SizedBox(
-                        width: 56,
-                        child: Text(
-                          '${bpm.round()} BPM',
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
-                      ),
-                    ],
+                  child: Slider(
+                    key: const ValueKey('practice-speed-slider'),
+                    value: speedPercent,
+                    min: 50,
+                    max: 150,
+                    divisions: 100,
+                    label: '${speedPercent.round()}%',
+                    onChanged: onSpeedChanged,
+                  ),
+                ),
+                SizedBox(
+                  width: 96,
+                  child: Text(
+                    '${speedPercent.round()}% · '
+                    '${effectiveBpm.round()} BPM',
+                    style: Theme.of(context).textTheme.labelSmall,
                   ),
                 ),
               ],
