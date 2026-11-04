@@ -199,7 +199,9 @@ void main() {
       );
     });
 
-    testWidgets('releases the microphone when the screen is disposed', (tester) async {
+    testWidgets('releases the microphone when the screen is disposed', (
+      tester,
+    ) async {
       final input = FakeInput(MicrophoneStatus.available);
       await pumpTuner(tester, input);
       await tester.tap(find.text('Start tuning'));
