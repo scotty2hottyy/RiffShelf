@@ -17,7 +17,7 @@ class PracticeSessionScreen extends StatefulWidget {
 }
 
 class _PracticeSessionScreenState extends State<PracticeSessionScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   static const _playheadX = 36.0;
   static const _topPadding = 26.0;
   static const _baseStringSpacing = 30.0;
@@ -66,23 +66,33 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
     return _timeline.measures[index].startBeat;
   }
 
-  double get _loopEndBeat {
+  double get _sectionEndBeat {
     if (_measureCount == 0) return _totalBeats;
     final index = _sectionIndexRange.end.round().clamp(0, _measureCount - 1);
-    final base = index + 1 < _measureCount
+    return index + 1 < _measureCount
         ? _timeline.measures[index + 1].startBeat
         : _timeline.totalBeats;
-    return base + _endOfTrackPadBeats;
   }
+
+  double get _loopEndBeat =>
+      _sectionEndBeat +
+      (!_looping && _isWholeSongSelected ? _endOfTrackPadBeats : 0);
 
   @override
   void initState() {
     super.initState();
     _ticker = createTicker(_onTick);
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) _pause();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _ticker.dispose();
     _elapsedBeats.dispose();
     _metronomeFlash.dispose();
@@ -103,7 +113,9 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
       return;
     }
 
-    _fireMetronomeTicks(previous, loopEnd);
+    // The end belongs to the next section, or to the loop's new first beat.
+    // Excluding it here prevents two clicks at the same wrap boundary.
+    _fireMetronomeTicks(previous, loopEnd, includeEnd: false);
     if (_looping && loopEnd > loopStart) {
       final regionLength = loopEnd - loopStart;
       final wrapped = loopStart + (rawNext - loopEnd) % regionLength;
@@ -117,10 +129,10 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
     }
   }
 
-  void _fireMetronomeTicks(double from, double to) {
+  void _fireMetronomeTicks(double from, double to, {bool includeEnd = true}) {
     if (!_metronome || to <= from) return;
     var beat = from.floor() + 1;
-    while (beat <= to) {
+    while (includeEnd ? beat <= to : beat < to) {
       _clickMetronome(beat.toDouble());
       beat++;
     }
@@ -170,22 +182,22 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
 
   void _onSpeedChanged(double value) => setState(() => _speedPercent = value);
 
-  void _onSectionChanged(RangeValues value) =>
-      setState(() => _sectionIndexRange = value);
+  void _onSectionChanged(RangeValues value) {
+    _pause();
+    setState(() => _sectionIndexRange = value);
+    _elapsedBeats.value = _loopStartBeat;
+  }
 
-  void _resetSection() => setState(() {
-    _sectionIndexRange = RangeValues(
-      0,
-      (_measureCount - 1).clamp(0, double.infinity).toDouble(),
-    );
-  });
+  void _resetSection() => _onSectionChanged(
+    RangeValues(0, (_measureCount - 1).clamp(0, double.infinity).toDouble()),
+  );
 
   void _seekByPixels(double dx) {
     if (_playing) _pause();
     final pixelsPerBeat = _basePixelsPerBeat * _scale;
     _elapsedBeats.value = (_elapsedBeats.value - dx / pixelsPerBeat).clamp(
-      0,
-      _totalBeats,
+      _loopStartBeat,
+      _loopEndBeat,
     );
   }
 
@@ -304,8 +316,7 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
                                                 sectionEndBeat:
                                                     _isWholeSongSelected
                                                     ? null
-                                                    : _loopEndBeat -
-                                                          _endOfTrackPadBeats,
+                                                    : _sectionEndBeat,
                                               ),
                                             ),
                                       ),

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/database/sqlite_tab_repository.dart';
 import '../core/database/tab_repository.dart';
 import '../core/models/saved_tab.dart';
-import '../features/tabs/practice_session_screen.dart';
+import '../features/tabs/practice_preparation_screen.dart';
 
 class PracticeScreen extends StatefulWidget {
   const PracticeScreen({super.key, this.repository});
@@ -81,7 +81,7 @@ class _PracticeScreenState extends State<PracticeScreen> {
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute<void>(
-                  builder: (_) => PracticeSessionScreen(tab: tab),
+                  builder: (_) => PracticePreparationScreen(tab: tab),
                 ),
               ),
             );

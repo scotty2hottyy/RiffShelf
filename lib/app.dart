@@ -13,6 +13,7 @@ class RiffShelfApp extends StatelessWidget {
 
     return MaterialApp(
       title: 'RiffShelf',
+      debugShowCheckedModeBanner: false,
       restorationScopeId: 'riffshelf',
       theme: ThemeData(
         colorScheme:
