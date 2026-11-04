@@ -72,5 +72,35 @@ abstract final class TunerPresets {
     instrument: InstrumentType.bass,
     notes: ['E1', 'A1', 'D2', 'G2'],
   );
-  static const all = [guitarStandard, dropD, dStandard, dropC, bassStandard];
+  static const dadgad = TuningPreset(
+    name: 'DADGAD',
+    instrument: InstrumentType.guitar,
+    notes: ['D2', 'A2', 'D3', 'G3', 'A3', 'D4'],
+  );
+  static const openG = TuningPreset(
+    name: 'Open G',
+    instrument: InstrumentType.guitar,
+    notes: ['D2', 'G2', 'D3', 'G3', 'B3', 'D4'],
+  );
+  static const bassDropD = TuningPreset(
+    name: 'Bass Drop D',
+    instrument: InstrumentType.bass,
+    notes: ['D1', 'A1', 'D2', 'G2'],
+  );
+  static const bassFiveString = TuningPreset(
+    name: 'Bass 5-String Standard',
+    instrument: InstrumentType.bass,
+    notes: ['B0', 'E1', 'A1', 'D2', 'G2'],
+  );
+  static const all = [
+    guitarStandard,
+    dropD,
+    dStandard,
+    dropC,
+    dadgad,
+    openG,
+    bassStandard,
+    bassDropD,
+    bassFiveString,
+  ];
 }

@@ -16,6 +16,7 @@ dependencies:
   crypto: ^3.0.6
   http: ^1.5.0
   record: ^7.1.2
+  shared_preferences: ^2.5.6
 
 dev_dependencies:
   flutter_test:
@@ -24,6 +25,7 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
   sqflite_common_ffi: ^2.3.6
+  shared_preferences_platform_interface: ^2.4.2
 
 flutter:
   uses-material-design: true

@@ -1,14 +1,19 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:riffshelf/core/models/tuning.dart';
+import 'package:riffshelf/core/models/instrument_type.dart';
 import 'package:riffshelf/features/tuner/audio_input.dart';
 import 'package:riffshelf/features/tuner/pitch_detector.dart';
 import 'package:riffshelf/features/tuner/tuner_controller.dart';
+import 'package:riffshelf/features/tuner/tuning_store.dart';
 import 'package:riffshelf/screens/tuner_screen.dart';
+import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 
 class FakeInput implements TunerAudioInput {
   FakeInput(this.status);
@@ -39,6 +44,18 @@ class FakeInput implements TunerAudioInput {
   }
 }
 
+class FakeSettingsStore implements TunerSettingsStore {
+  TunerSettings settings = const TunerSettings();
+
+  @override
+  Future<TunerSettings> load() async => settings;
+
+  @override
+  Future<void> save(TunerSettings value) async {
+    settings = value;
+  }
+}
+
 Float64List sine(double hz, int n, int rate) => Float64List.fromList([
   for (var i = 0; i < n; i++) 0.5 * math.sin(2 * math.pi * hz * i / rate),
 ]);
@@ -56,6 +73,132 @@ void emitPitch(FakeInput input, double hz) {
 }
 
 void main() {
+  group('Tuner tunings', () {
+    test('preset notes follow low-to-high guitar and bass string order', () {
+      expect(TunerPresets.guitarStandard.notes, [
+        'E2',
+        'A2',
+        'D3',
+        'G3',
+        'B3',
+        'E4',
+      ]);
+      expect(TunerPresets.dropD.notes, ['D2', 'A2', 'D3', 'G3', 'B3', 'E4']);
+      expect(TunerPresets.dadgad.notes, ['D2', 'A2', 'D3', 'G3', 'A3', 'D4']);
+      expect(TunerPresets.openG.notes, ['D2', 'G2', 'D3', 'G3', 'B3', 'D4']);
+      expect(TunerPresets.bassStandard.notes, ['E1', 'A1', 'D2', 'G2']);
+      expect(TunerPresets.bassDropD.notes, ['D1', 'A1', 'D2', 'G2']);
+      expect(TunerPresets.bassFiveString.notes, ['B0', 'E1', 'A1', 'D2', 'G2']);
+    });
+
+    test('A4 reference and preset frequencies use the specified octave', () {
+      expect(frequencyFromMidi(midiFromNoteName('A4')!), 440);
+      expect(
+        frequencyFromMidi(midiFromNoteName('E2')!),
+        closeTo(82.4069, 0.001),
+      );
+      expect(
+        frequencyFromMidi(midiFromNoteName('E1')!),
+        closeTo(41.2034, 0.001),
+      );
+      expect(
+        frequencyFromMidi(midiFromNoteName('B0')!),
+        closeTo(30.8677, 0.001),
+      );
+    });
+
+    test('validates names, counts, notes, and detector range', () {
+      expect(
+        tuningValidationError('Seven', InstrumentType.guitar, [
+          'B1',
+          'E2',
+          'A2',
+          'D3',
+          'G3',
+          'B3',
+          'E4',
+        ]),
+        isNull,
+      );
+      expect(
+        tuningValidationError('Five', InstrumentType.bass, [
+          'B0',
+          'E1',
+          'A1',
+          'D2',
+          'G2',
+        ]),
+        isNull,
+      );
+      expect(
+        tuningValidationError(
+          '',
+          InstrumentType.guitar,
+          TunerPresets.guitarStandard.notes,
+        ),
+        isNotNull,
+      );
+      expect(
+        tuningValidationError('Bad', InstrumentType.bass, ['E1', 'A1', 'D2']),
+        isNotNull,
+      );
+      expect(
+        tuningValidationError('Bad', InstrumentType.guitar, [
+          'H2',
+          'A2',
+          'D3',
+          'G3',
+          'B3',
+          'E4',
+        ]),
+        isNotNull,
+      );
+      expect(
+        tuningValidationError('Bad', InstrumentType.guitar, [
+          'C0',
+          'A2',
+          'D3',
+          'G3',
+          'B3',
+          'E4',
+        ]),
+        isNotNull,
+      );
+    });
+
+    test(
+      'custom tunings and selected id serialize and reject bad stored data',
+      () {
+        const custom = CustomTuning(
+          id: 'one',
+          preset: TuningPreset(
+            name: 'Low B',
+            instrument: InstrumentType.bass,
+            notes: ['B0', 'E1', 'A1', 'D2', 'G2'],
+          ),
+        );
+        const settings = TunerSettings(
+          customTunings: [custom],
+          selectedId: 'one',
+        );
+        final restored = TunerSettings.fromJson(jsonEncode(settings.toJson()));
+        expect(restored.selectedId, 'one');
+        expect(restored.customTunings.single.preset.notes, custom.preset.notes);
+        expect(TunerSettings.fromJson('{bad').customTunings, isEmpty);
+      },
+    );
+
+    test('local settings survive a new store instance', () async {
+      SharedPreferencesAsyncPlatform.instance =
+          InMemorySharedPreferencesAsync.empty();
+      await LocalTunerSettingsStore().save(
+        const TunerSettings(selectedId: 'preset:bass:Bass Standard'),
+      );
+      final restored = await LocalTunerSettingsStore().load();
+      expect(restored.selectedId, 'preset:bass:Bass Standard');
+    });
+  });
+
   group('PitchDetector', () {
     test('detects guitar and bass pitches', () {
       final detector = PitchDetector(sampleRate: 22050);
@@ -80,12 +223,18 @@ void main() {
   });
 
   group('TunerScreen', () {
-    Future<void> pumpTuner(WidgetTester tester, FakeInput input) {
-      return tester.pumpWidget(
+    Future<void> pumpTuner(WidgetTester tester, FakeInput input) async {
+      await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: TunerScreen(inputFactory: () => input)),
+          home: Scaffold(
+            body: TunerScreen(
+              inputFactory: () => input,
+              settingsStore: FakeSettingsStore(),
+            ),
+          ),
         ),
       );
+      await tester.ensureVisible(find.text('Start tuning'));
     }
 
     testWidgets('explains when there is no microphone', (tester) async {
@@ -167,7 +316,7 @@ void main() {
     ) async {
       final input = FakeInput(MicrophoneStatus.available);
       await pumpTuner(tester, input);
-      await tester.tap(find.byKey(const Key('tuner-string-E4')));
+      await tester.tap(find.byKey(const Key('tuner-string-5-E4')));
       await tester.pump();
       expect(
         tester.widget<Text>(find.byKey(const Key('tuner-target-note'))).data,
@@ -212,6 +361,178 @@ void main() {
       expect(input.stops, greaterThan(0));
       expect(input.disposals, 1);
     });
+
+    testWidgets('switches guitar and bass strings and restores last preset', (
+      tester,
+    ) async {
+      final store = FakeSettingsStore();
+      final input = FakeInput(MicrophoneStatus.available);
+      Future<void> show() => tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TunerScreen(
+              key: UniqueKey(),
+              inputFactory: () => input,
+              settingsStore: store,
+            ),
+          ),
+        ),
+      );
+      await show();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Bass').first);
+      await tester.pump();
+      expect(find.byKey(const Key('tuner-string-0-E1')), findsOneWidget);
+      expect(find.byKey(const Key('tuner-string-5-E4')), findsNothing);
+      expect(store.settings.selectedId, contains('bass'));
+      await show();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('tuner-string-0-E1')), findsOneWidget);
+      expect(find.byKey(const Key('tuner-string-5-E4')), findsNothing);
+    });
+
+    testWidgets('creates, edits, restores, and deletes a custom tuning', (
+      tester,
+    ) async {
+      final store = FakeSettingsStore();
+      Future<void> show() => tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TunerScreen(
+              key: UniqueKey(),
+              inputFactory: () => FakeInput(MicrophoneStatus.available),
+              settingsStore: store,
+            ),
+          ),
+        ),
+      );
+      await show();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('New tuning'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('tuning-name')),
+        'Acoustic open',
+      );
+      await tester.enterText(find.byKey(const Key('tuning-note-0')), 'D2');
+      await tester.tap(find.text('Save tuning'));
+      await tester.pumpAndSettle();
+      expect(store.settings.customTunings.single.preset.name, 'Acoustic open');
+      expect(store.settings.customTunings.single.preset.notes.first, 'D2');
+      expect(find.text('Edit tuning'), findsOneWidget);
+
+      await tester.tap(find.text('Edit tuning'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('tuning-name')),
+        'Open variation',
+      );
+      await tester.enterText(find.byKey(const Key('tuning-note-1')), 'G2');
+      await tester.tap(find.text('Save tuning'));
+      await tester.pumpAndSettle();
+      expect(store.settings.customTunings.single.preset.notes[1], 'G2');
+
+      await show();
+      await tester.pumpAndSettle();
+      expect(find.text('Open variation'), findsOneWidget);
+      expect(find.byKey(const Key('tuner-string-0-D2')), findsOneWidget);
+      await tester.tap(find.text('Delete tuning'));
+      await tester.pumpAndSettle();
+      expect(store.settings.customTunings, isEmpty);
+      expect(find.byKey(const Key('tuner-string-0-E2')), findsOneWidget);
+    });
+
+    testWidgets('rejects invalid custom note before saving', (tester) async {
+      final store = FakeSettingsStore();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TunerScreen(
+              inputFactory: () => FakeInput(MicrophoneStatus.available),
+              settingsStore: store,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('New tuning'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('tuning-note-0')), 'H9');
+      await tester.tap(find.text('Save tuning'));
+      await tester.pump();
+      expect(find.textContaining('Use notes from A0'), findsOneWidget);
+      expect(store.settings.customTunings, isEmpty);
+    });
+
+    testWidgets('fixed arrangement ignores the saved standalone selection', (
+      tester,
+    ) async {
+      final store = FakeSettingsStore()
+        ..settings = const TunerSettings(
+          selectedId: 'preset:bass:Bass Standard',
+        );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TunerScreen(
+              preset: TunerPresets.openG,
+              inputFactory: () => FakeInput(MicrophoneStatus.available),
+              settingsStore: store,
+            ),
+          ),
+        ),
+      );
+      expect(find.byKey(const Key('tuner-string-0-D2')), findsOneWidget);
+      expect(find.byKey(const Key('tuner-string-0-E1')), findsNothing);
+      expect(find.text('New tuning'), findsNothing);
+    });
+
+    testWidgets('shows all strings in a twelve-string custom tuning', (
+      tester,
+    ) async {
+      final store = FakeSettingsStore()
+        ..settings = const TunerSettings(
+          customTunings: [
+            CustomTuning(
+              id: 'twelve',
+              preset: TuningPreset(
+                name: 'Twelve',
+                instrument: InstrumentType.guitar,
+                notes: [
+                  'E2',
+                  'E2',
+                  'A2',
+                  'A2',
+                  'D3',
+                  'D3',
+                  'G3',
+                  'G3',
+                  'B3',
+                  'B3',
+                  'E4',
+                  'E4',
+                ],
+              ),
+            ),
+          ],
+          selectedId: 'twelve',
+        );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TunerScreen(
+              inputFactory: () => FakeInput(MicrophoneStatus.available),
+              settingsStore: store,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('tuner-string-0-E2')), findsOneWidget);
+      expect(find.byKey(const Key('tuner-string-1-E2')), findsOneWidget);
+      expect(find.byKey(const Key('tuner-string-11-E4')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
   });
 
   group('TunerController', () {
@@ -228,6 +549,7 @@ void main() {
           'E1',
           -15.0,
         ),
+        (TunerPresets.bassFiveString, 30.8677, 'B0', 0.0),
       ]) {
         tuner.preset = preset;
         emitPitch(input, frequency.toDouble());

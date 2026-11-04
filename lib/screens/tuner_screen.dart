@@ -1,17 +1,27 @@
 import 'package:flutter/material.dart';
 
 import '../core/models/tuning.dart';
+import '../core/models/instrument_type.dart';
 import '../features/tuner/audio_input.dart';
 import '../features/tuner/tuner_controller.dart';
+import '../features/tuner/tuning_store.dart';
 
 class TunerScreen extends StatefulWidget {
-  const TunerScreen({super.key, this.inputFactory, this.preset});
+  const TunerScreen({
+    super.key,
+    this.inputFactory,
+    this.preset,
+    this.settingsStore,
+  });
 
   /// A fixed arrangement tuning; null keeps the standalone preset picker.
   final TuningPreset? preset;
 
   /// Overrides the microphone source (used by tests).
   final TunerAudioInput Function()? inputFactory;
+
+  /// Overrides local tuner preferences (used by tests).
+  final TunerSettingsStore? settingsStore;
 
   @override
   State<TunerScreen> createState() => _TunerScreenState();
@@ -21,11 +31,111 @@ class _TunerScreenState extends State<TunerScreen> with WidgetsBindingObserver {
   late final TunerController _controller = TunerController(
     input: (widget.inputFactory ?? RecordAudioInput.new)(),
   )..preset = widget.preset ?? TunerPresets.guitarStandard;
+  late final TunerSettingsStore _settingsStore =
+      widget.settingsStore ?? LocalTunerSettingsStore();
+  List<CustomTuning> _customTunings = [];
+  String? _selectedId;
+  bool _selectionTouched = false;
+  Future<void> _saveQueue = Future<void>.value();
+
+  String _builtInId(TuningPreset preset) =>
+      'preset:${preset.instrument.name}:${preset.name}';
+
+  Future<void> _loadSettings() async {
+    if (widget.preset != null) return;
+    try {
+      final settings = await _settingsStore.load();
+      if (!mounted) return;
+      setState(() => _customTunings = settings.customTunings);
+      if (_selectionTouched) return;
+      for (final preset in TunerPresets.all) {
+        if (_builtInId(preset) == settings.selectedId) {
+          _controller.preset = preset;
+          _selectedId = settings.selectedId;
+          return;
+        }
+      }
+      for (final custom in _customTunings) {
+        if (custom.id == settings.selectedId) {
+          _controller.preset = custom.preset;
+          _selectedId = custom.id;
+          return;
+        }
+      }
+    } catch (_) {
+      // The default tuning remains usable if local preferences are unavailable.
+    }
+  }
+
+  void _saveSettings() {
+    final settings = TunerSettings(
+      customTunings: List.unmodifiable(_customTunings),
+      selectedId: _selectedId,
+    );
+    _saveQueue = _saveQueue
+        .then((_) => _settingsStore.save(settings))
+        .catchError((Object _) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Could not save tuner settings.')),
+            );
+          }
+        });
+  }
+
+  void _select(TuningPreset preset, String id) {
+    _selectionTouched = true;
+    _selectedId = id;
+    _controller.preset = preset;
+    _saveSettings();
+  }
+
+  Future<void> _editTuning([CustomTuning? existing]) async {
+    final preset = await _showTuningDialog(
+      context,
+      existing?.preset ?? _controller.preset,
+      editing: existing != null,
+    );
+    if (preset == null || !mounted) return;
+    final custom = CustomTuning(
+      id: existing?.id ?? DateTime.now().microsecondsSinceEpoch.toString(),
+      preset: preset,
+    );
+    setState(() {
+      if (existing != null) {
+        _customTunings = [
+          for (final item in _customTunings)
+            item.id == existing.id ? custom : item,
+        ];
+      } else {
+        _customTunings = [..._customTunings, custom];
+      }
+    });
+    _select(preset, custom.id);
+  }
+
+  void _deleteTuning(CustomTuning custom) {
+    setState(
+      () => _customTunings = [
+        for (final item in _customTunings)
+          if (item.id != custom.id) item,
+      ],
+    );
+    if (_selectedId == custom.id) {
+      final fallback = custom.preset.instrument == InstrumentType.bass
+          ? TunerPresets.bassStandard
+          : TunerPresets.guitarStandard;
+      _select(fallback, _builtInId(fallback));
+    } else {
+      _saveSettings();
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _loadSettings();
   }
 
   @override
@@ -59,7 +169,16 @@ class _TunerScreenState extends State<TunerScreen> with WidgetsBindingObserver {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (widget.preset == null)
-                  _PresetPicker(controller: _controller)
+                  _PresetPicker(
+                    controller: _controller,
+                    customTunings: _customTunings,
+                    selectedId: _selectedId,
+                    onSelect: _select,
+                    onCreate: () => _editTuning(),
+                    onEdit: _editTuning,
+                    onDelete: _deleteTuning,
+                    builtInId: _builtInId,
+                  )
                 else
                   Text(widget.preset!.name),
                 const SizedBox(height: 20),
@@ -78,24 +197,240 @@ class _TunerScreenState extends State<TunerScreen> with WidgetsBindingObserver {
 }
 
 class _PresetPicker extends StatelessWidget {
-  const _PresetPicker({required this.controller});
+  const _PresetPicker({
+    required this.controller,
+    required this.customTunings,
+    required this.selectedId,
+    required this.onSelect,
+    required this.onCreate,
+    required this.onEdit,
+    required this.onDelete,
+    required this.builtInId,
+  });
   final TunerController controller;
+  final List<CustomTuning> customTunings;
+  final String? selectedId;
+  final void Function(TuningPreset, String) onSelect;
+  final VoidCallback onCreate;
+  final void Function(CustomTuning) onEdit;
+  final void Function(CustomTuning) onDelete;
+  final String Function(TuningPreset) builtInId;
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
+    final instrument = controller.preset.instrument;
+    final selectedCustom = [
+      for (final item in customTunings)
+        if (item.id == selectedId) item,
+    ].firstOrNull;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final preset in TunerPresets.all)
-          ChoiceChip(
-            label: Text(preset.name),
-            selected: identical(preset, controller.preset),
-            onSelected: (_) => controller.preset = preset,
-          ),
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final type in [InstrumentType.guitar, InstrumentType.bass])
+              ChoiceChip(
+                label: Text(type.label),
+                selected: instrument == type,
+                onSelected: (_) {
+                  final preset = type == InstrumentType.guitar
+                      ? TunerPresets.guitarStandard
+                      : TunerPresets.bassStandard;
+                  onSelect(preset, builtInId(preset));
+                },
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final preset in TunerPresets.all)
+              if (preset.instrument == instrument)
+                ChoiceChip(
+                  label: Text(preset.name),
+                  selected: identical(preset, controller.preset),
+                  onSelected: (_) => onSelect(preset, builtInId(preset)),
+                ),
+            for (final custom in customTunings)
+              if (custom.preset.instrument == instrument)
+                ChoiceChip(
+                  label: Text(custom.preset.name),
+                  selected: custom.id == selectedId,
+                  onSelected: (_) => onSelect(custom.preset, custom.id),
+                ),
+          ],
+        ),
+        Wrap(
+          spacing: 8,
+          children: [
+            TextButton.icon(
+              onPressed: onCreate,
+              icon: const Icon(Icons.add),
+              label: const Text('New tuning'),
+            ),
+            if (selectedCustom != null) ...[
+              TextButton.icon(
+                onPressed: () => onEdit(selectedCustom),
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('Edit tuning'),
+              ),
+              TextButton.icon(
+                onPressed: () => onDelete(selectedCustom),
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Delete tuning'),
+              ),
+            ],
+          ],
+        ),
       ],
     );
   }
+}
+
+Future<TuningPreset?> _showTuningDialog(
+  BuildContext context,
+  TuningPreset initial, {
+  bool editing = false,
+}) async {
+  final name = TextEditingController(
+    text: editing ? initial.name : 'My tuning',
+  );
+  final notes = [
+    for (final note in initial.notes) TextEditingController(text: note),
+  ];
+  var instrument = initial.instrument;
+  var count = initial.stringCount;
+  String? error;
+
+  final result = await showDialog<TuningPreset>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setDialogState) {
+        final counts = instrument == InstrumentType.guitar
+            ? [6, 7, 8, 9, 10, 11, 12]
+            : [4, 5, 6];
+        return AlertDialog(
+          title: const Text('Custom tuning'),
+          content: SizedBox(
+            width: 360,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    key: const Key('tuning-name'),
+                    controller: name,
+                    decoration: const InputDecoration(labelText: 'Name'),
+                  ),
+                  DropdownButtonFormField<InstrumentType>(
+                    key: const Key('tuning-instrument'),
+                    initialValue: instrument,
+                    decoration: const InputDecoration(labelText: 'Instrument'),
+                    items: [
+                      for (final type in [
+                        InstrumentType.guitar,
+                        InstrumentType.bass,
+                      ])
+                        DropdownMenuItem(value: type, child: Text(type.label)),
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setDialogState(() {
+                        instrument = value;
+                        final defaults = value == InstrumentType.guitar
+                            ? TunerPresets.guitarStandard.notes
+                            : TunerPresets.bassStandard.notes;
+                        count = defaults.length;
+                        for (var i = 0; i < defaults.length; i++) {
+                          if (i < notes.length) {
+                            notes[i].text = defaults[i];
+                          } else {
+                            notes.add(TextEditingController(text: defaults[i]));
+                          }
+                        }
+                        error = null;
+                      });
+                    },
+                  ),
+                  DropdownButtonFormField<int>(
+                    key: ValueKey('tuning-count-${instrument.name}'),
+                    initialValue: counts.contains(count) ? count : counts.first,
+                    decoration: const InputDecoration(labelText: 'Strings'),
+                    items: [
+                      for (final value in counts)
+                        DropdownMenuItem(value: value, child: Text('$value')),
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setDialogState(() {
+                        count = value;
+                        while (notes.length < count) {
+                          notes.add(TextEditingController(text: 'E2'));
+                        }
+                        error = null;
+                      });
+                    },
+                  ),
+                  for (var index = 0; index < count; index++)
+                    TextField(
+                      key: Key('tuning-note-$index'),
+                      controller: notes[index],
+                      decoration: InputDecoration(
+                        labelText: 'String ${index + 1} (low to high)',
+                        hintText: 'E2',
+                      ),
+                    ),
+                  if (error != null)
+                    Text(
+                      error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final values = [
+                  for (var index = 0; index < count; index++)
+                    notes[index].text.trim(),
+                ];
+                final validation = tuningValidationError(
+                  name.text,
+                  instrument,
+                  values,
+                );
+                if (validation != null) {
+                  setDialogState(() => error = validation);
+                  return;
+                }
+                Navigator.pop(
+                  context,
+                  TuningPreset(
+                    name: name.text.trim(),
+                    instrument: instrument,
+                    notes: List.unmodifiable(values),
+                  ),
+                );
+              },
+              child: const Text('Save tuning'),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+  return result;
 }
 
 class _MeterCard extends StatelessWidget {
@@ -196,6 +531,7 @@ class _MeterCard extends StatelessWidget {
                   children: [
                     for (var index = 0; index < notes.length; index++)
                       _StringBadge(
+                        index: index,
                         note: notes[index],
                         active:
                             controller.selectedStringIndex == index ||
@@ -214,6 +550,7 @@ class _MeterCard extends StatelessWidget {
                   for (var index = 0; index < rowNotes.length; index++) ...[
                     if (index > 0) const SizedBox(width: 8),
                     _StringBadge(
+                      index: start + index,
                       note: rowNotes[index],
                       active:
                           controller.selectedStringIndex == start + index ||
@@ -245,11 +582,13 @@ class _MeterCard extends StatelessWidget {
 
 class _StringBadge extends StatelessWidget {
   const _StringBadge({
+    required this.index,
     required this.note,
     required this.active,
     required this.color,
     required this.onTap,
   });
+  final int index;
   final String note;
   final bool active;
   final Color color;
@@ -258,7 +597,7 @@ class _StringBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      key: Key('tuner-string-$note'),
+      key: Key('tuner-string-$index-$note'),
       onTap: onTap,
       customBorder: const CircleBorder(),
       child: Container(
