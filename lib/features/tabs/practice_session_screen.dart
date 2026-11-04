@@ -24,9 +24,7 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
   static const _basePixelsPerBeat = 70.0;
   static const _endOfTrackPadBeats = 4.0;
 
-  late final PracticeTimeline _timeline = PracticeTimeline.fromTab(
-    widget.tab,
-  );
+  late final PracticeTimeline _timeline = PracticeTimeline.fromTab(widget.tab);
   late final double _totalBeats = _timeline.totalBeats + _endOfTrackPadBeats;
 
   final ValueNotifier<double> _elapsedBeats = ValueNotifier(0);
@@ -64,10 +62,7 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
 
   double get _loopStartBeat {
     if (_measureCount == 0) return 0;
-    final index = _sectionIndexRange.start.round().clamp(
-      0,
-      _measureCount - 1,
-    );
+    final index = _sectionIndexRange.start.round().clamp(0, _measureCount - 1);
     return _timeline.measures[index].startBeat;
   }
 
@@ -135,7 +130,9 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
     final isDownbeat = _timeline.measures.any(
       (marker) => (marker.startBeat - beat).abs() < 0.05,
     );
-    SystemSound.play(isDownbeat ? SystemSoundType.alert : SystemSoundType.click);
+    SystemSound.play(
+      isDownbeat ? SystemSoundType.alert : SystemSoundType.click,
+    );
     HapticFeedback.selectionClick();
     _metronomeFlash.value = true;
     Future<void>.delayed(const Duration(milliseconds: 90), () {
@@ -295,8 +292,7 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
                                                 measures: _timeline.measures,
                                                 elapsedBeats: elapsed,
                                                 pixelsPerBeat:
-                                                    _basePixelsPerBeat *
-                                                    _scale,
+                                                    _basePixelsPerBeat * _scale,
                                                 playheadX: _playheadX,
                                                 stringSpacing: stringSpacing,
                                                 topPadding: _topPadding,
@@ -485,8 +481,7 @@ class _PracticeTrackPainter extends CustomPainter {
     final sectionStart = sectionStartBeat;
     final sectionEnd = sectionEndBeat;
     if (sectionStart != null && sectionEnd != null) {
-      final left =
-          playheadX + (sectionStart - elapsedBeats) * pixelsPerBeat;
+      final left = playheadX + (sectionStart - elapsedBeats) * pixelsPerBeat;
       final right = playheadX + (sectionEnd - elapsedBeats) * pixelsPerBeat;
       final clampedLeft = left.clamp(0.0, size.width);
       final clampedRight = right.clamp(0.0, size.width);
@@ -552,8 +547,8 @@ class _PracticeTrackPainter extends CustomPainter {
 
       // A note is "active" for as long as it's actually sounding (its
       // normalized duration), not just a fixed instant at the playhead.
-      final active = elapsedBeats >= event.startBeat &&
-          elapsedBeats <= event.endBeat;
+      final active =
+          elapsedBeats >= event.startBeat && elapsedBeats <= event.endBeat;
       final played = elapsedBeats > event.endBeat;
 
       final Color background;
@@ -562,9 +557,7 @@ class _PracticeTrackPainter extends CustomPainter {
         background = colorScheme.primary;
         foreground = colorScheme.onPrimary;
       } else if (played) {
-        background = colorScheme.surfaceContainerHighest.withValues(
-          alpha: 0.5,
-        );
+        background = colorScheme.surfaceContainerHighest.withValues(alpha: 0.5);
         foreground = colorScheme.onSurfaceVariant.withValues(alpha: 0.5);
       } else {
         background = colorScheme.secondaryContainer;
@@ -588,10 +581,7 @@ class _PracticeTrackPainter extends CustomPainter {
         ),
       );
       textPainter.layout();
-      textPainter.paint(
-        canvas,
-        Offset(startX + 4, y - textPainter.height / 2),
-      );
+      textPainter.paint(canvas, Offset(startX + 4, y - textPainter.height / 2));
     }
   }
 
@@ -660,19 +650,13 @@ class _PracticeControls extends StatelessWidget {
                   key: const ValueKey('practice-loop-toggle'),
                   tooltip: looping ? 'Loop on' : 'Loop off',
                   onPressed: onToggleLoop,
-                  icon: Icon(
-                    Icons.repeat,
-                    color: looping ? accent : null,
-                  ),
+                  icon: Icon(Icons.repeat, color: looping ? accent : null),
                 ),
                 IconButton(
                   key: const ValueKey('practice-metronome-toggle'),
                   tooltip: metronome ? 'Metronome on' : 'Metronome off',
                   onPressed: onToggleMetronome,
-                  icon: Icon(
-                    Icons.av_timer,
-                    color: metronome ? accent : null,
-                  ),
+                  icon: Icon(Icons.av_timer, color: metronome ? accent : null),
                 ),
               ],
             ),

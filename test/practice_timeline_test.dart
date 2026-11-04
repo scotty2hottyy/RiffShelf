@@ -78,9 +78,7 @@ void main() {
 
     final timeline = PracticeTimeline.fromTab(tab);
 
-    final overridden = timeline.events.firstWhere(
-      (e) => e.stringNumber == 1,
-    );
+    final overridden = timeline.events.firstWhere((e) => e.stringNumber == 1);
     final fallback = timeline.events.firstWhere((e) => e.stringNumber == 2);
     expect(overridden.durationBeats, 2.5);
     expect(fallback.durationBeats, 1);
@@ -118,14 +116,8 @@ void main() {
       const TabMeasure(
         number: 1,
         beats: [
-          TabBeat(
-            position: -2,
-            notes: [TabNote(stringNumber: 1, fret: 0)],
-          ),
-          TabBeat(
-            position: 99,
-            notes: [TabNote(stringNumber: 2, fret: 1)],
-          ),
+          TabBeat(position: -2, notes: [TabNote(stringNumber: 1, fret: 0)]),
+          TabBeat(position: 99, notes: [TabNote(stringNumber: 2, fret: 1)]),
         ],
       ),
     ]);

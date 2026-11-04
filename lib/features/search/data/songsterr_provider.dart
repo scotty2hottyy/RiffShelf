@@ -73,13 +73,16 @@ class SongsterrProvider
     final modern = Uri.parse('$_baseUrl/api/songs')
         .replace(queryParameters: {'pattern': query.text.trim(), 'size': '50'});
     http.Response? response;
+    String primaryOutcome = 'request failed';
     try {
       response = await _structuredClient.request(
         modern,
         SongsterrStage.search,
         _searchTrace,
       );
-    } on SongsterrException {
+      primaryOutcome = 'HTTP ${response.statusCode}';
+    } on SongsterrException catch (error) {
+      primaryOutcome = error.failure.name;
       // A failed search request can use the legacy endpoint. Tab downloads
       // still use their own structured metadata and track endpoints.
     }
@@ -99,7 +102,9 @@ class SongsterrProvider
       );
       throw SongsterrException(
         SongsterrFailure.httpError,
-        message: 'Songsterr is temporarily unavailable.',
+        message:
+            'Songsterr is temporarily unavailable '
+            '(search: $primaryOutcome; fallback: HTTP ${response.statusCode}).',
       );
     }
     try {
