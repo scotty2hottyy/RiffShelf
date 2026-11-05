@@ -30,10 +30,7 @@ class ThemeProvider extends ChangeNotifier {
         colorScheme: ColorScheme.fromSeed(
           seedColor: accentColor,
           brightness: Brightness.light,
-        ).copyWith(
-          primary: accentColor,
-          secondary: const Color(0xFF8BF3E3),
-        ),
+        ).copyWith(primary: accentColor, secondary: const Color(0xFF8BF3E3)),
         scaffoldBackgroundColor: const Color(0xFFFAFAFA),
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFFFAFAFA),
@@ -50,14 +47,15 @@ class ThemeProvider extends ChangeNotifier {
       );
     } else {
       return ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: accentColor,
-          brightness: Brightness.dark,
-        ).copyWith(
-          primary: accentColor,
-          secondary: const Color(0xFF8BF3E3),
-          surface: surfaceColor,
-        ),
+        colorScheme:
+            ColorScheme.fromSeed(
+              seedColor: accentColor,
+              brightness: Brightness.dark,
+            ).copyWith(
+              primary: accentColor,
+              secondary: const Color(0xFF8BF3E3),
+              surface: surfaceColor,
+            ),
         scaffoldBackgroundColor: backgroundColor,
         appBarTheme: const AppBarTheme(
           backgroundColor: backgroundColor,
