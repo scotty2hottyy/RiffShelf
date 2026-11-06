@@ -24,14 +24,70 @@ class TabDetailScreen extends StatefulWidget {
 class _TabDetailScreenState extends State<TabDetailScreen> {
   late SavedTab current = widget.tab;
   late bool structured = widget.tab.hasStructuredContent;
+  List<SavedTab> relatedTracks = const [];
+
+  // An import hash identifies a file; online keys identify a provider's song.
+  (String, String, String)? trackGroup(SavedTab tab) {
+    final key = tab.importKey;
+    if (key == null) return null;
+    final file = RegExp(r'^sha256:([0-9a-fA-F]{64}):track:[0-9]+$')
+        .firstMatch(key);
+    if (file != null) return ('file', file.group(1)!.toLowerCase(), '');
+    final id = tab.sourceId;
+    if (id != null &&
+        id.isNotEmpty &&
+        tab.source.isNotEmpty &&
+        key.startsWith('online:${tab.source}:$id:') &&
+        key.length > 'online:${tab.source}:$id:'.length) {
+      return ('online', tab.source, id);
+    }
+    return null;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    loadRelatedTracks();
+  }
+
+  Future<void> loadRelatedTracks() async {
+    final group = trackGroup(current);
+    if (group == null || current.id == null || widget.repository == null) {
+      return;
+    }
+    try {
+      final all = await widget.repository!.findTabs();
+      if (!mounted) return;
+      final related = all
+          .where((tab) => tab.id != null && trackGroup(tab) == group)
+          .toList();
+      if (related.length > 1 && related.any((tab) => tab.id == current.id)) {
+        setState(() => relatedTracks = related);
+      }
+    } catch (_) {
+      // Track navigation is optional and does not affect the saved tab viewer.
+    }
+  }
+
   late final ArtworkService artworkService =
       widget.artworkService ?? ArtworkService();
 
+  void updateTrack(SavedTab updated) {
+    setState(() {
+      relatedTracks = [
+        for (final track in relatedTracks)
+          if (track.id == updated.id) updated else track,
+      ];
+      if (current.id == updated.id) current = updated;
+    });
+  }
+
   Future<void> chooseAlbum() async {
+    final target = current;
     try {
       final candidates = await artworkService.candidates(
-        current.artist,
-        current.title,
+        target.artist,
+        target.title,
       );
       if (!mounted) return;
       final selected = await showDialog<AlbumCandidate>(
@@ -58,9 +114,9 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
       );
       if (selected == null) return;
       final metadata = await artworkService.select(selected);
-      final updated = current.copyWith(artwork: metadata);
+      final updated = target.copyWith(artwork: metadata);
       await widget.repository!.save(updated);
-      if (mounted) setState(() => current = updated);
+      if (mounted) updateTrack(updated);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -75,10 +131,11 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
   }
 
   Future<void> removeAlbum() async {
+    final target = current;
     try {
-      final updated = current.copyWith(clearArtwork: true);
+      final updated = target.copyWith(clearArtwork: true);
       await widget.repository!.save(updated);
-      if (mounted) setState(() => current = updated);
+      if (mounted) updateTrack(updated);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -147,6 +204,40 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
                 if (tab.bpm != null) '${tab.bpm} BPM',
               ].join(' · '),
             ),
+            if (relatedTracks.length > 1) ...[
+              const SizedBox(height: 16),
+              DropdownButtonFormField<int>(
+                key: ValueKey('track-${tab.id}'),
+                initialValue: tab.id,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Saved tracks'),
+                items: [
+                  for (final track in relatedTracks)
+                    DropdownMenuItem(
+                      value: track.id,
+                      child: Text(
+                        '${track.trackName?.isNotEmpty == true ? track.trackName : 'Track'} · ${track.instrument.label}',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+                onChanged: (id) {
+                  if (id == null || id == current.id) return;
+                  final next = relatedTracks.firstWhere(
+                    (track) => track.id == id,
+                  );
+                  setState(() {
+                    // Retain album edits made before switching tracks.
+                    relatedTracks = [
+                      for (final track in relatedTracks)
+                        if (track.id == current.id) current else track,
+                    ];
+                    current = next;
+                    structured = next.hasStructuredContent;
+                  });
+                },
+              ),
+            ],
             const SizedBox(height: 20),
             if (tab.hasStructuredContent && tab.hasTextContent)
               SegmentedButton<bool>(
@@ -161,7 +252,7 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
             if (!tab.hasUsableContent)
               const Text('No compatible tablature is available.')
             else if (structured)
-              StructuredTabViewer(tab: tab)
+              StructuredTabViewer(key: ValueKey('viewer-${tab.id}'), tab: tab)
             else
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,

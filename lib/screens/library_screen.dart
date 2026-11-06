@@ -345,121 +345,167 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Column(
-    children: [
-      Padding(
-        padding: const EdgeInsets.all(16),
-        child: Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 12,
-          runSpacing: 8,
-          children: [
-            Text('Library', style: Theme.of(context).textTheme.headlineSmall),
-            FilledButton.icon(
-              onPressed: importTab,
-              icon: const Icon(Icons.upload_file),
-              label: const Text('Import Tab'),
-            ),
-          ],
-        ),
-      ),
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: search,
-                onChanged: (_) => refresh(),
-                decoration: const InputDecoration(
-                  labelText: 'Search title or artist',
-                  prefixIcon: Icon(Icons.search),
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final accent = dark ? const Color(0xFF54E8D5) : const Color(0xFF006C65);
+    return FutureBuilder<List<SavedTab>>(
+      future: tabs,
+      builder: (context, snapshot) => ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+        children: [
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 12,
+            runSpacing: 8,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.library_music_outlined,
+                    color: Color(0xFFD89635),
+                  ),
+                  const SizedBox(width: 9),
+                  Flexible(
+                    child: Text(
+                      'Library',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              FilledButton.icon(
+                onPressed: importTab,
+                icon: const Icon(Icons.upload_file),
+                label: const Text('Import Tab'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: search,
+                  onChanged: (_) => refresh(),
+                  decoration: InputDecoration(
+                    labelText: 'Search title or artist',
+                    prefixIcon: Icon(Icons.search, color: accent),
+                    filled: true,
+                    fillColor: dark ? const Color(0xFF101D20) : Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                  ),
                 ),
               ),
-            ),
-            IconButton(
-              tooltip: 'Filters',
-              onPressed: showFilters,
-              icon: const Icon(Icons.filter_list),
-            ),
-            IconButton(
-              tooltip: 'Clear filters',
-              onPressed: clearFilters,
-              icon: const Icon(Icons.filter_alt_off),
+              IconButton(
+                tooltip: 'Filters',
+                onPressed: showFilters,
+                icon: const Icon(Icons.filter_list),
+              ),
+              IconButton(
+                tooltip: 'Clear filters',
+                onPressed: clearFilters,
+                icon: const Icon(Icons.filter_alt_off),
+              ),
+            ],
+          ),
+          if (instrument != null ||
+              classification != null ||
+              stringCount != null ||
+              tuning != null ||
+              tags.isNotEmpty ||
+              favoritesOnly) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                if (instrument != null)
+                  InputChip(
+                    label: Text(instrument!.label),
+                    deleteButtonTooltipMessage: 'Remove instrument filter',
+                    onDeleted: () {
+                      instrument = null;
+                      refresh();
+                    },
+                  ),
+                if (classification != null)
+                  InputChip(
+                    label: Text(classification!.name),
+                    deleteButtonTooltipMessage: 'Remove classification filter',
+                    onDeleted: () {
+                      classification = null;
+                      refresh();
+                    },
+                  ),
+                if (stringCount != null)
+                  InputChip(
+                    label: Text('$stringCount strings'),
+                    deleteButtonTooltipMessage: 'Remove string count filter',
+                    onDeleted: () {
+                      stringCount = null;
+                      refresh();
+                    },
+                  ),
+                if (tuning != null)
+                  InputChip(
+                    label: Text('Tuning: ${tuning!.join(' ')}'),
+                    deleteButtonTooltipMessage: 'Remove tuning filter',
+                    onDeleted: () {
+                      tuning = null;
+                      refresh();
+                    },
+                  ),
+                for (final tag in tags)
+                  InputChip(
+                    label: Text('Tag: $tag'),
+                    deleteButtonTooltipMessage: 'Remove $tag tag filter',
+                    onDeleted: () {
+                      tags = {...tags}..remove(tag);
+                      refresh();
+                    },
+                  ),
+                if (favoritesOnly)
+                  InputChip(
+                    label: const Text('Favorites'),
+                    deleteButtonTooltipMessage: 'Remove favorites filter',
+                    onDeleted: () {
+                      favoritesOnly = false;
+                      refresh();
+                    },
+                  ),
+              ],
             ),
           ],
-        ),
-      ),
-      Expanded(
-        child: FutureBuilder<List<SavedTab>>(
-          future: tabs,
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              return const Center(child: Text('Could not load your library.'));
-            }
-            if (!snapshot.hasData) {
-              return const Center(child: Text('Loading library…'));
-            }
-            final results = snapshot.data!;
-            if (results.isEmpty) {
-              return const Center(
-                child: Text(
-                  'No saved tabs match. Import a tab or clear filters.',
-                ),
-              );
-            }
-            return ListView.builder(
-              itemCount: results.length,
-              itemBuilder: (context, index) {
-                final tab = results[index];
-                final label = tab.instrument == InstrumentType.other
-                    ? 'Unknown instrument'
-                    : tab.instrument.label;
-                return ListTile(
-                  leading: AlbumArt(tab: tab, size: 48),
-                  title: Text(tab.title),
-                  subtitle: Text(
-                    '${tab.artist.isEmpty ? 'Unknown artist' : tab.artist} · $label · ${tab.stringCount} strings · ${tab.tuning.join(' ')}${tab.tags.isEmpty ? '' : '\n${tab.tags.join(', ')}'}',
-                  ),
-                  isThreeLine: tab.tags.isNotEmpty,
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        tooltip: tab.isFavorite
-                            ? 'Remove favorite'
-                            : 'Add favorite',
-                        onPressed: () => toggleFavorite(tab),
-                        icon: Icon(
-                          tab.isFavorite
-                              ? Icons.favorite
-                              : Icons.favorite_border,
-                          color: tab.isFavorite
-                              ? Theme.of(context).colorScheme.primary
-                              : null,
-                        ),
-                      ),
-                      PopupMenuButton<String>(
-                        tooltip: 'Tab options',
-                        onSelected: (action) {
-                          if (action == 'edit') {
-                            editTab(tab);
-                          } else {
-                            deleteTab(tab);
-                          }
-                        },
-                        itemBuilder: (_) => const [
-                          PopupMenuItem(
-                            value: 'edit',
-                            child: Text('Edit details'),
-                          ),
-                          PopupMenuItem(value: 'delete', child: Text('Delete')),
-                        ],
-                      ),
-                    ],
-                  ),
-                  onTap: () async {
+          const SizedBox(height: 20),
+          if (snapshot.hasError)
+            const Text('Could not load your library.')
+          else if (!snapshot.hasData)
+            const Center(child: Text('Loading library…'))
+          else if (snapshot.data!.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Text(
+                'No saved tabs match. Import a tab or clear filters.',
+              ),
+            )
+          else
+            for (final tab in snapshot.data!)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _LibraryCard(
+                  tab: tab,
+                  accent: accent,
+                  onFavorite: () => toggleFavorite(tab),
+                  onEdit: () => editTab(tab),
+                  onDelete: () => deleteTab(tab),
+                  onOpen: () async {
                     await Navigator.push(
                       context,
                       MaterialPageRoute<void>(
@@ -469,12 +515,156 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     );
                     if (mounted) refresh();
                   },
-                );
-              },
-            );
-          },
+                ),
+              ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LibraryCard extends StatelessWidget {
+  const _LibraryCard({
+    required this.tab,
+    required this.accent,
+    required this.onFavorite,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onOpen,
+  });
+  final SavedTab tab;
+  final Color accent;
+  final VoidCallback onFavorite, onEdit, onDelete, onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return Material(
+      color: dark ? const Color(0xFF101B1E) : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color: dark
+              ? const Color(0xFF304247)
+              : theme.colorScheme.outlineVariant,
         ),
       ),
-    ],
-  );
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onOpen,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: AlbumArt(tab: tab, size: 70),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          tab.title,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          tab.artist.isEmpty ? 'Unknown artist' : tab.artist,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: muted,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          tab.instrument == InstrumentType.other
+                              ? 'Unknown instrument'
+                              : tab.instrument.label,
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: accent,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                [
+                  '${tab.stringCount} strings',
+                  if (tab.tuning.isNotEmpty) tab.tuning.join(' '),
+                  if (tab.trackName?.trim().isNotEmpty == true) tab.trackName!,
+                  if (tab.source.trim().isNotEmpty) tab.source,
+                ].join(' · '),
+                style: theme.textTheme.bodyMedium?.copyWith(color: muted),
+              ),
+              if (tab.tags.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    for (final tag in tab.tags)
+                      Chip(
+                        label: Text(tag),
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                  ],
+                ),
+              ],
+              Row(
+                children: [
+                  IconButton(
+                    tooltip: tab.isFavorite
+                        ? 'Remove favorite'
+                        : 'Add favorite',
+                    onPressed: onFavorite,
+                    icon: Icon(
+                      tab.isFavorite ? Icons.favorite : Icons.favorite_border,
+                      color: tab.isFavorite ? accent : muted,
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      tab.isFavorite ? 'Favorite' : 'Add favorite',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: muted,
+                      ),
+                    ),
+                  ),
+                  PopupMenuButton<String>(
+                    tooltip: 'Tab options',
+                    onSelected: (action) {
+                      if (action == 'edit') {
+                        onEdit();
+                      } else if (action == 'delete') {
+                        onDelete();
+                      }
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'edit', child: Text('Edit details')),
+                      PopupMenuItem(value: 'delete', child: Text('Delete')),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

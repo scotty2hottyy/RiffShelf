@@ -1,4 +1,9 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:riffshelf/core/theme_provider.dart';
+import 'package:riffshelf/features/artwork/album_art.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:riffshelf/core/database/tab_repository.dart';
 import 'package:riffshelf/core/models/instrument_type.dart';
@@ -103,6 +108,13 @@ void main() {
     expect(repo.lastFilter.tuning, ['E', 'A', 'D', 'G']);
     expect(repo.lastFilter.tags, {'rock', 'live'});
     expect(repo.lastFilter.favoritesOnly, isTrue);
+    expect(find.text('Tag: rock'), findsOneWidget);
+    await tester.tap(find.byTooltip('Remove rock tag filter'));
+    await tester.pumpAndSettle();
+    expect(repo.lastFilter.tags, {'live'});
+    await tester.tap(find.byTooltip('Remove favorites filter'));
+    await tester.pumpAndSettle();
+    expect(repo.lastFilter.favoritesOnly, isFalse);
     await tester.tap(find.byTooltip('Clear filters'));
     await tester.pumpAndSettle();
     expect(repo.lastFilter.query, isEmpty);
@@ -128,6 +140,8 @@ void main() {
     await tester.tap(find.byTooltip('Add favorite'));
     await tester.pumpAndSettle();
     expect(repo.data.single.isFavorite, isTrue);
+    expect(find.byTooltip('Remove favorite'), findsOneWidget);
+    expect(find.widgetWithText(Chip, 'old'), findsOneWidget);
     await tester.tap(find.text('Offline song'));
     await tester.pumpAndSettle();
     expect(find.text('G|--0--|\nD|--1--|'), findsOneWidget);
@@ -176,5 +190,81 @@ void main() {
     expect(repo.data.single.classification, InstrumentClassification.other);
     expect(repo.data.single.asciiTab, tab().asciiTab);
     expect(repo.data.single.sourceUrl, 'source');
+  });
+  for (final light in [true, false]) {
+    testWidgets(
+      'library cards support small screens and large text in ${light ? 'light' : 'dark'} theme',
+      (tester) async {
+        tester.view.physicalSize = const Size(320, 640);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final repo = MemoryRepository()..data.add(tab());
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ThemeProvider().getTheme(light),
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(context)
+                  .copyWith(textScaler: const TextScaler.linear(1.8)),
+              child: child!,
+            ),
+            home: Scaffold(body: LibraryScreen(repository: repo)),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.scrollUntilVisible(
+          find.byTooltip('Add favorite'),
+          150,
+          scrollable: find.byType(Scrollable).first,
+        );
+        expect(find.text('Offline song'), findsOneWidget);
+        expect(
+          find.text('local'),
+          findsNothing,
+        ); // Source is part of the metadata line.
+        expect(find.textContaining('local'), findsOneWidget);
+        expect(find.widgetWithText(Chip, 'old'), findsOneWidget);
+      },
+    );
+  }
+
+  testWidgets('library uses cached artwork and handles missing files offline', (
+    tester,
+  ) async {
+    final dir = (await tester.runAsync(
+      () => Directory.systemTemp.createTemp('library_art'),
+    ))!;
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/cover.png');
+    await tester.runAsync(
+      () => file.writeAsBytes(
+        base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=',
+        ),
+      ),
+    );
+    final repo = MemoryRepository()
+      ..data.add(
+        tab().copyWith(artwork: jsonEncode({'local_path': file.path})),
+      );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: LibraryScreen(repository: repo)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(AlbumArt), findsOneWidget);
+    expect(find.byType(Image), findsOneWidget);
+    await tester.runAsync(() => file.delete());
+    repo.data[0] = tab().copyWith(
+      artwork: jsonEncode({'local_path': '${dir.path}/missing.png'}),
+    );
+    await tester.tap(find.byTooltip('Clear filters'));
+    await tester.pump();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.album_outlined), findsOneWidget);
   });
 }
