@@ -2,6 +2,7 @@
 
 import re
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
@@ -59,4 +60,15 @@ def lookup_recordings(
     except MusicBrainzError as error:
         status = {"rate_limited": 429, "provider_rate_limited": 503,
                   "provider_timeout": 504}.get(error.code, 502)
+        return error_response(status, error.code, error.message)
+
+
+@router.get("/metadata/releases/{release_id}/artwork", tags=["metadata"],
+            summary="Find front-cover artwork for a MusicBrainz release")
+def lookup_artwork(request: Request, release_id: UUID):
+    """Return artwork metadata or null when no front cover is available."""
+    try:
+        return request.app.state.artwork_provider.lookup(str(release_id))
+    except MusicBrainzError as error:
+        status = {"provider_rate_limited": 503, "provider_timeout": 504}.get(error.code, 502)
         return error_response(status, error.code, error.message)

@@ -30,6 +30,7 @@ class SavedTab {
     this.classification = InstrumentClassification.other,
     this.isFavorite = false,
     this.albumArt,
+    this.artwork,
   }) : assert(stringCount > 0),
        assert(capo >= 0);
 
@@ -59,6 +60,9 @@ class SavedTab {
   /// Optional artwork location or other artwork metadata.
   final String? albumArt;
 
+  /// JSON metadata for a user-selected release and locally cached cover.
+  final String? artwork;
+
   bool get hasStructuredContent =>
       measures.isNotEmpty &&
       measures.any(
@@ -73,6 +77,8 @@ class SavedTab {
     List<String>? tags,
     bool? isFavorite,
     String? importKey,
+    String? artwork,
+    bool clearArtwork = false,
   }) => SavedTab(
     id: id ?? this.id,
     title: title,
@@ -95,6 +101,7 @@ class SavedTab {
     classification: classification,
     isFavorite: isFavorite ?? this.isFavorite,
     albumArt: albumArt,
+    artwork: clearArtwork ? null : artwork ?? this.artwork,
   );
 
   SavedTab copyWithSourceData(String? value) => SavedTab(
@@ -119,6 +126,7 @@ class SavedTab {
     classification: classification,
     isFavorite: isFavorite,
     albumArt: albumArt,
+    artwork: artwork,
   );
 
   SavedTab replaceExisting(SavedTab existing) => SavedTab(
@@ -142,7 +150,8 @@ class SavedTab {
     sourceData: sourceData,
     classification: classification,
     isFavorite: isFavorite,
-    albumArt: albumArt,
+    albumArt: existing.albumArt,
+    artwork: existing.artwork,
   );
 
   SavedTab withMetadata({
@@ -177,6 +186,7 @@ class SavedTab {
     classification: classification ?? this.classification,
     isFavorite: isFavorite,
     albumArt: albumArt,
+    artwork: artwork,
   );
 
   Map<String, Object?> toDatabaseMap() => {
@@ -204,6 +214,7 @@ class SavedTab {
     'classification': classification.name,
     'is_favorite': isFavorite ? 1 : 0,
     'album_art': albumArt,
+    'artwork': artwork,
   };
 
   factory SavedTab.fromDatabaseMap(Map<String, Object?> map) {
@@ -237,6 +248,7 @@ class SavedTab {
       ),
       isFavorite: map['is_favorite'] == 1,
       albumArt: map['album_art'] as String?,
+      artwork: map['artwork'] as String?,
     );
   }
 }

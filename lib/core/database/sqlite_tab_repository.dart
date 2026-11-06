@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -29,7 +30,7 @@ class SqliteTabRepository implements TabRepository {
     return _database ??= await _databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 3,
+        version: 4,
         onCreate: (db, version) async {
           await db.execute('''
           CREATE TABLE saved_tabs (
@@ -54,7 +55,8 @@ class SqliteTabRepository implements TabRepository {
             source_data TEXT,
             classification TEXT NOT NULL DEFAULT 'other',
             is_favorite INTEGER NOT NULL DEFAULT 0,
-            album_art TEXT
+            album_art TEXT,
+            artwork TEXT
           )
         ''');
           await db.execute(
@@ -86,6 +88,9 @@ class SqliteTabRepository implements TabRepository {
             await db.execute(
               'CREATE UNIQUE INDEX saved_tabs_import_key ON saved_tabs(import_key)',
             );
+          }
+          if (oldVersion < 4) {
+            await db.execute('ALTER TABLE saved_tabs ADD COLUMN artwork TEXT');
           }
         },
       ),
@@ -162,6 +167,7 @@ class SqliteTabRepository implements TabRepository {
         whereArgs: [tab.id],
       );
       if (count == 0) throw StateError('Tab does not exist: ${tab.id}');
+      await _cleanupArtwork(db);
       return tab;
     }
     try {
@@ -189,7 +195,39 @@ class SqliteTabRepository implements TabRepository {
 
   @override
   Future<void> delete(int id) async {
-    await (await _db).delete('saved_tabs', where: 'id = ?', whereArgs: [id]);
+    final db = await _db;
+    await db.delete('saved_tabs', where: 'id = ?', whereArgs: [id]);
+    await _cleanupArtwork(db);
+  }
+
+  Future<void> _cleanupArtwork(Database db) async {
+    try {
+      final directory = Directory(
+        p.join(await _databaseFactory.getDatabasesPath(), 'artwork'),
+      );
+      if (!await directory.exists()) return;
+      final rows = await db.query('saved_tabs', columns: ['artwork']);
+      final referenced = <String>{};
+      for (final row in rows) {
+        try {
+          final data = jsonDecode(row['artwork'] as String? ?? 'null');
+          if (data is Map && data['local_path'] is String) {
+            referenced.add(data['local_path'] as String);
+          }
+        } catch (_) {
+          /* Ignore malformed legacy metadata. */
+        }
+      }
+      await for (final entity in directory.list()) {
+        if (entity is File &&
+            RegExp(r'^[0-9a-f-]{36}\.img$').hasMatch(p.basename(entity.path)) &&
+            !referenced.contains(entity.path)) {
+          await entity.delete();
+        }
+      }
+    } catch (_) {
+      /* Cache cleanup must never affect saved tabs. */
+    }
   }
 
   @override

@@ -8,6 +8,7 @@ from app.config import Settings
 from app.api.v1.search import RateLimiter
 from app.songsterr import SongsterrSearchProvider
 from app.musicbrainz import MusicBrainzProvider, RequestPacer
+from app.artwork import ArtworkProvider
 
 
 class HealthResponse(BaseModel):
@@ -25,6 +26,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.songsterr_provider = SongsterrSearchProvider(settings.songsterr_timeout_seconds)
     app.state.musicbrainz_provider = MusicBrainzProvider(settings.musicbrainz_timeout_seconds, RequestPacer())
+    app.state.artwork_provider = ArtworkProvider(settings.musicbrainz_timeout_seconds)
     app.state.search_rate_limiter = RateLimiter(settings.search_rate_limit_per_minute)
 
     @app.get("/health", response_model=HealthResponse, tags=["health"])

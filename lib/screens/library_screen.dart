@@ -9,6 +9,7 @@ import '../features/library/edit_tab_screen.dart';
 import '../features/import/tab_import_service.dart';
 import '../features/import/guitar_pro_importer.dart';
 import '../features/tabs/tab_detail_screen.dart';
+import '../features/artwork/album_art.dart';
 
 Future<int?> chooseTabTrack(
   BuildContext context,
@@ -416,6 +417,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     ? 'Unknown instrument'
                     : tab.instrument.label;
                 return ListTile(
+                  leading: AlbumArt(tab: tab, size: 48),
                   title: Text(tab.title),
                   subtitle: Text(
                     '${tab.artist.isEmpty ? 'Unknown artist' : tab.artist} · $label · ${tab.stringCount} strings · ${tab.tuning.join(' ')}${tab.tags.isEmpty ? '' : '\n${tab.tags.join(', ')}'}',
@@ -457,12 +459,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       ),
                     ],
                   ),
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => TabDetailScreen(tab: tab),
-                    ),
-                  ),
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) =>
+                            TabDetailScreen(tab: tab, repository: repository),
+                      ),
+                    );
+                    if (mounted) refresh();
+                  },
                 );
               },
             );
