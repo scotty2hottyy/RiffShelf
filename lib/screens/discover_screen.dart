@@ -4,6 +4,7 @@ import '../core/database/sqlite_tab_repository.dart';
 import '../core/database/tab_repository.dart';
 import '../core/models/instrument_type.dart';
 import '../core/models/saved_tab.dart';
+import '../features/artwork/album_art.dart';
 import '../features/search/application/tab_search_service.dart';
 import '../features/search/data/backend_tab_search_client.dart';
 import '../features/search/data/songsterr_provider.dart';
@@ -36,6 +37,46 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   String? error;
   TabSearchResult? failedResult;
   int generation = 0;
+  List<SavedTab> savedTabs = const [];
+
+  Future<void> refreshArtwork() async {
+    try {
+      final tabs = await repository.findTabs();
+      if (mounted) setState(() => savedTabs = tabs);
+    } catch (_) {
+      // Artwork is optional; a storage failure must not block discovery.
+    }
+  }
+
+  SavedTab artworkFor(TabSearchResult result) {
+    final matches = savedTabs
+        .where(
+          (tab) =>
+              tab.source == result.sourceName &&
+              tab.sourceId == result.externalId &&
+              tab.artwork != null,
+        )
+        .toList();
+    if (matches.isNotEmpty &&
+        matches.every((tab) => tab.artwork == matches.first.artwork)) {
+      return matches.first;
+    }
+    return SavedTab(
+      title: result.title,
+      artist: result.artist,
+      source: result.sourceName,
+      sourceUrl: result.sourceUrl,
+      instrument: result.instrument,
+      stringCount: 1,
+      tuning: const [],
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    refreshArtwork();
+  }
 
   @override
   void dispose() {
@@ -47,6 +88,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   Future<void> search() async {
     FocusManager.instance.primaryFocus?.unfocus();
     if (query.text.trim().isEmpty) return;
+    refreshArtwork();
     failedResult = null;
     final current = ++generation;
     setState(() {
@@ -113,6 +155,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
           builder: (_) => _PreviewScreen(tab: tab, repository: repository),
         ),
       );
+      await refreshArtwork();
     } catch (e) {
       if (mounted) {
         setState(
@@ -127,115 +170,332 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Column(
-    children: [
-      Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            TextField(
-              controller: query,
-              textInputAction: TextInputAction.search,
-              onSubmitted: (_) => search(),
-              onTapOutside: (_) =>
-                  FocusManager.instance.primaryFocus?.unfocus(),
-              decoration: const InputDecoration(
-                labelText: 'Song or artist',
-                prefixIcon: Icon(Icons.search),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<InstrumentType?>(
-                    isExpanded: true,
-                    initialValue: instrument,
-                    decoration: const InputDecoration(labelText: 'Instrument'),
-                    items: const [
-                      DropdownMenuItem(
-                        value: null,
-                        child: Text('Guitar and bass'),
-                      ),
-                      DropdownMenuItem(
-                        value: InstrumentType.guitar,
-                        child: Text('Guitar'),
-                      ),
-                      DropdownMenuItem(
-                        value: InstrumentType.bass,
-                        child: Text('Bass'),
-                      ),
-                    ],
-                    onChanged: (value) => setState(() => instrument = value),
-                  ),
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final accent = dark ? const Color(0xFF54E8D5) : const Color(0xFF006C65);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return ListView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+      children: [
+        TextField(
+          controller: query,
+          textInputAction: TextInputAction.search,
+          onSubmitted: (_) => search(),
+          onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
+          decoration: InputDecoration(
+            labelText: 'Song or artist',
+            hintText: 'Search songs, artists, or riffs',
+            prefixIcon: Icon(Icons.search_rounded, color: accent),
+            filled: true,
+            fillColor: dark ? const Color(0xFF101D20) : Colors.white,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
+          ),
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final filter = DropdownButtonFormField<InstrumentType?>(
+              isExpanded: true,
+              initialValue: instrument,
+              decoration: InputDecoration(
+                labelText: 'Instrument',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
                 ),
-                const SizedBox(width: 12),
-                FilledButton(
-                  onPressed: loading ? null : search,
-                  child: const Text('Search'),
+              ),
+              items: const [
+                DropdownMenuItem(value: null, child: Text('Guitar and bass')),
+                DropdownMenuItem(
+                  value: InstrumentType.guitar,
+                  child: Text('Guitar'),
+                ),
+                DropdownMenuItem(
+                  value: InstrumentType.bass,
+                  child: Text('Bass'),
                 ),
               ],
+              onChanged: (value) => setState(() => instrument = value),
+            );
+            final button = FilledButton.icon(
+              onPressed: loading ? null : search,
+              style: FilledButton.styleFrom(
+                backgroundColor: accent,
+                foregroundColor: dark ? const Color(0xFF052723) : Colors.white,
+                minimumSize: const Size(112, 56),
+              ),
+              icon: const Icon(Icons.search),
+              label: const Text('Search'),
+            );
+            if (constraints.maxWidth < 340 ||
+                MediaQuery.textScalerOf(context).scale(1) > 1.3) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [filter, const SizedBox(height: 10), button],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: filter),
+                const SizedBox(width: 12),
+                button,
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 24),
+        Row(
+          children: [
+            const Icon(Icons.auto_awesome, color: Color(0xFFD89635), size: 21),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                'Discover Tabs',
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -.4,
+                ),
+              ),
             ),
           ],
         ),
+        const SizedBox(height: 4),
+        Text(
+          'FIND YOUR NEXT SONG',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: muted,
+            letterSpacing: 1.5,
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (loading) ...[
+          LinearProgressIndicator(
+            color: accent,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            failedResult == null
+                ? 'Searching for tabs…'
+                : 'Loading arrangement…',
+            style: theme.textTheme.bodyMedium?.copyWith(color: muted),
+          ),
+          const SizedBox(height: 16),
+        ],
+        if (error != null)
+          _DiscoverMessage(
+            icon: Icons.cloud_off_outlined,
+            title: 'Could not load tabs',
+            message: error!,
+            action: TextButton(
+              onPressed: () =>
+                  failedResult == null ? search() : openResult(failedResult!),
+              child: const Text('Retry'),
+            ),
+          )
+        else if (response != null && response!.results.isEmpty && !loading)
+          const _DiscoverMessage(
+            icon: Icons.search_off,
+            title: 'No results found.',
+            message: 'Try another song or artist.',
+          )
+        else if (response == null && !loading)
+          const _DiscoverMessage(
+            icon: Icons.library_music_outlined,
+            title: 'Find a song to play',
+            message: 'Search for a song or artist to explore available tabs.',
+          ),
+        if (response != null &&
+            response!.results.isNotEmpty &&
+            response!.failures.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              'Some providers are unavailable: ${response!.failures.map((f) => f.provider).join(', ')}',
+              style: theme.textTheme.bodyMedium?.copyWith(color: muted),
+            ),
+          ),
+        if (response != null)
+          for (final result in response!.results)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _SongCard(
+                result: result,
+                artwork: artworkFor(result),
+                accent: accent,
+                onOpen: loading ? null : () => openResult(result),
+              ),
+            ),
+      ],
+    );
+  }
+}
+
+class _DiscoverMessage extends StatelessWidget {
+  const _DiscoverMessage({
+    required this.icon,
+    required this.title,
+    required this.message,
+    this.action,
+  });
+  final IconData icon;
+  final String title, message;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
-      if (loading) const LinearProgressIndicator(),
-      if (error != null)
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(height: 10),
+          Text(
+            title,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            message,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          ?action,
+        ],
+      ),
+    );
+  }
+}
+
+class _SongCard extends StatelessWidget {
+  const _SongCard({
+    required this.result,
+    required this.artwork,
+    required this.accent,
+    required this.onOpen,
+  });
+  final TabSearchResult result;
+  final SavedTab artwork;
+  final Color accent;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return Material(
+      color: dark ? const Color(0xFF101B1E) : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color: dark
+              ? const Color(0xFF304247)
+              : theme.colorScheme.outlineVariant,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onOpen,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(error!),
-              TextButton(
-                onPressed: () =>
-                    failedResult == null ? search() : openResult(failedResult!),
-                child: const Text('Retry'),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: AlbumArt(tab: artwork, size: 70),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      result.title,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      result.artist,
+                      style: theme.textTheme.bodyMedium?.copyWith(color: muted),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          result.instrument.label,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: accent,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        if (result.tuning?.isNotEmpty == true)
+                          Text(
+                            result.tuning!.join(' '),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: muted,
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 9,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            result.sourceName,
+                            style: theme.textTheme.labelSmall,
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: onOpen,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: accent,
+                            side: BorderSide(color: accent),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          icon: const Icon(Icons.download_rounded, size: 18),
+                          label: const Text('Save'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
         ),
-      if (response != null &&
-          response!.results.isEmpty &&
-          error == null &&
-          !loading)
-        const Padding(
-          padding: EdgeInsets.all(24),
-          child: Text('No results found.'),
-        ),
-      if (response != null &&
-          response!.results.isNotEmpty &&
-          response!.failures.isNotEmpty)
-        Padding(
-          padding: const EdgeInsets.all(8),
-          child: Text(
-            'Some providers are unavailable: ${response!.failures.map((f) => f.provider).join(', ')}',
-          ),
-        ),
-      Expanded(
-        child: ListView.builder(
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          itemCount: response?.results.length ?? 0,
-          itemBuilder: (context, index) {
-            final result = response!.results[index];
-            return ListTile(
-              title: Text(result.title),
-              subtitle: Text(
-                [
-                  result.artist,
-                  result.instrument.label,
-                  result.sourceName,
-                  if (result.tuning?.isNotEmpty == true)
-                    result.tuning!.join(' '),
-                ].join(' · '),
-              ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: loading ? null : () => openResult(result),
-            );
-          },
-        ),
       ),
-    ],
-  );
+    );
+  }
 }
 
 class _PreviewScreen extends StatefulWidget {
