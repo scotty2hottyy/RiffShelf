@@ -443,7 +443,9 @@ class _MeterCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final reading = controller.reading;
-    final accent = theme.colorScheme.primary;
+    final accent = theme.brightness == Brightness.dark
+        ? const Color(0xFF54E8D5)
+        : const Color(0xFF006C65);
     final color = reading == null
         ? theme.colorScheme.onSurfaceVariant
         : reading.inTune
@@ -455,7 +457,9 @@ class _MeterCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: theme.brightness == Brightness.dark
+            ? const Color(0xFF101B1E)
+            : Colors.white,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: accent.withValues(alpha: 0.2)),
       ),
@@ -484,25 +488,32 @@ class _MeterCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
-          LayoutBuilder(
-            builder: (context, constraints) => SizedBox(
-              height: (constraints.maxWidth * 0.52).clamp(120.0, 220.0),
-              width: double.infinity,
-              child: CustomPaint(
-                key: const Key('tuner-cents-dial'),
-                painter: CentsDialPainter(
-                  cents: reading?.targetCents,
-                  needleColor: color,
-                  trackColor: theme.colorScheme.onSurfaceVariant.withValues(
-                    alpha: 0.35,
+          Semantics(
+            label: 'Tuning scale, minus 20 to plus 20 cents',
+            child: LayoutBuilder(
+              builder: (context, constraints) => SizedBox(
+                height: (constraints.maxWidth * 0.60).clamp(145.0, 240.0),
+                width: double.infinity,
+                child: CustomPaint(
+                  key: const Key('tuner-cents-dial'),
+                  painter: CentsDialPainter(
+                    cents: reading?.targetCents,
+                    needleColor: color,
+                    trackColor: theme.colorScheme.onSurfaceVariant.withValues(
+                      alpha: 0.35,
+                    ),
+                    inTuneColor: accent,
+                    textScale: MediaQuery.textScalerOf(context).scale(12) / 12,
                   ),
-                  inTuneColor: accent,
                 ),
               ),
             ),
           ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 16,
+            runSpacing: 4,
             children: [
               Text('Flat', style: theme.textTheme.labelSmall),
               Text(
@@ -526,10 +537,44 @@ class _MeterCard extends StatelessWidget {
               onPressed: () => controller.selectString(null),
               child: const Text('Automatic detection'),
             ),
+          const SizedBox(height: 12),
+          Semantics(
+            label:
+                '${controller.preset.instrument.label} illustration, ${controller.preset.stringCount} strings',
+            child: SizedBox(
+              height: 112,
+              width: double.infinity,
+              child: CustomPaint(
+                key: const Key('tuner-instrument-illustration'),
+                painter: InstrumentStringPainter(
+                  stringCount: controller.preset.notes.length,
+                  isBass: controller.preset.instrument == InstrumentType.bass,
+                  activeStrings: {
+                    for (var i = 0; i < controller.preset.notes.length; i++)
+                      if (controller.selectedStringIndex == i ||
+                          (controller.selectedStringIndex == null &&
+                              reading?.targetNote ==
+                                  controller.preset.notes[i]))
+                        i,
+                  },
+                  accent: accent,
+                  outline: theme.colorScheme.onSurfaceVariant,
+                  surface: theme.brightness == Brightness.dark
+                      ? const Color(0xFF17292C)
+                      : const Color(0xFFE2EEEA),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
           LayoutBuilder(
             builder: (context, constraints) {
               final notes = controller.preset.notes;
-              if (notes.length > 6) {
+              final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+              if (notes.length > 6 ||
+                  textScale > 1.3 ||
+                  (notes.length != 6 &&
+                      notes.length * 54 - 8 > constraints.maxWidth)) {
                 return Wrap(
                   alignment: WrapAlignment.center,
                   spacing: 8,
@@ -543,7 +588,7 @@ class _MeterCard extends StatelessWidget {
                             controller.selectedStringIndex == index ||
                             (controller.selectedStringIndex == null &&
                                 reading?.targetNote == notes[index]),
-                        color: color,
+                        color: accent,
                         onTap: () => controller.selectString(index),
                       ),
                   ],
@@ -562,7 +607,7 @@ class _MeterCard extends StatelessWidget {
                           controller.selectedStringIndex == start + index ||
                           (controller.selectedStringIndex == null &&
                               reading?.targetNote == rowNotes[index]),
-                      color: color,
+                      color: accent,
                       onTap: () => controller.selectString(start + index),
                     ),
                   ],
@@ -607,8 +652,12 @@ class _StringBadge extends StatelessWidget {
       onTap: onTap,
       customBorder: const CircleBorder(),
       child: Container(
-        width: 46,
-        height: 46,
+        width:
+            46 *
+            (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 2.0),
+        height:
+            46 *
+            (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 2.0),
         alignment: Alignment.center,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
@@ -629,23 +678,26 @@ class CentsDialPainter extends CustomPainter {
     required this.needleColor,
     required this.trackColor,
     required this.inTuneColor,
+    this.textScale = 1,
   });
   final double? cents;
   final Color needleColor;
   final Color trackColor;
   final Color inTuneColor;
+  final double textScale;
 
   /// Radians from straight up; values beyond the visible scale stop at its ends.
   static double angleForCents(double cents) =>
-      cents.clamp(-50.0, 50.0) / 50 * math.pi / 2;
+      cents.clamp(-20.0, 20.0) / 20 * math.pi / 2;
 
-  static const double inTuneStart = -math.pi / 20;
-  static const double inTuneSweep = math.pi / 10;
+  static const markerValues = [-20, -10, 0, 10, 20];
+  static const double inTuneStart = -math.pi / 8;
+  static const double inTuneSweep = math.pi / 4;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final pivot = Offset(size.width / 2, size.height - 8);
-    final radius = math.min(size.width / 2 - 18, size.height - 20);
+    final pivot = Offset(size.width / 2, size.height - 20);
+    final radius = math.min(size.width / 2 - 28, size.height - 32);
     if (radius <= 0) return;
     final arc = Rect.fromCircle(center: pivot, radius: radius);
     canvas.drawArc(
@@ -670,12 +722,12 @@ class CentsDialPainter extends CustomPainter {
         ..strokeWidth = 6
         ..strokeCap = StrokeCap.round,
     );
-    for (var tick = -50; tick <= 50; tick += 10) {
+    for (var tick = -20; tick <= 20; tick += 2) {
       final angle = angleForCents(tick.toDouble());
       final direction = Offset(math.sin(angle), -math.cos(angle));
       final length = tick == 0
           ? 14.0
-          : tick % 50 == 0
+          : tick % 10 == 0
           ? 12.0
           : 8.0;
       final paint = Paint()
@@ -686,6 +738,36 @@ class CentsDialPainter extends CustomPainter {
         pivot + direction * (radius - length - 7),
         pivot + direction * (radius - 7),
         paint,
+      );
+    }
+    for (final tick in markerValues) {
+      final angle = angleForCents(tick.toDouble());
+      final point =
+          pivot + Offset(math.sin(angle), -math.cos(angle)) * (radius - 28);
+      final label = TextPainter(
+        textDirection: TextDirection.ltr,
+        textScaler: TextScaler.linear(textScale),
+        text: TextSpan(
+          text: tick > 0 ? '+$tick' : '$tick',
+          style: TextStyle(
+            fontSize: 11,
+            color: tick == 0 ? inTuneColor : needleColor,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      )..layout();
+      label.paint(
+        canvas,
+        Offset(
+          (point.dx - label.width / 2).clamp(
+            0.0,
+            math.max(0.0, size.width - label.width),
+          ),
+          (point.dy - label.height / 2).clamp(
+            0.0,
+            math.max(0.0, size.height - label.height),
+          ),
+        ),
       );
     }
     final value = cents;
@@ -707,7 +789,84 @@ class CentsDialPainter extends CustomPainter {
       old.cents != cents ||
       old.needleColor != needleColor ||
       old.trackColor != trackColor ||
-      old.inTuneColor != inTuneColor;
+      old.inTuneColor != inTuneColor ||
+      old.textScale != textScale;
+}
+
+/// Original vector instrument silhouette; indices follow the preset's low-to-high order.
+class InstrumentStringPainter extends CustomPainter {
+  InstrumentStringPainter({
+    required this.stringCount,
+    required this.isBass,
+    required this.activeStrings,
+    required this.accent,
+    required this.outline,
+    required this.surface,
+  });
+  final int stringCount;
+  final bool isBass;
+  final Set<int> activeStrings;
+  final Color accent, outline, surface;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    final body = Path()
+      ..moveTo(w * .30, h * .35)
+      ..cubicTo(w * .24, h * .03, w * .04, h * .05, w * .04, h * .50)
+      ..cubicTo(w * .04, h * .95, w * .24, h * .97, w * .30, h * .65)
+      ..lineTo(w * .86, h * .65)
+      ..lineTo(w * .95, h * .58)
+      ..lineTo(w * .95, h * .42)
+      ..lineTo(w * .86, h * .35)
+      ..close();
+    canvas.drawPath(body, Paint()..color = surface);
+    canvas.drawPath(
+      body,
+      Paint()
+        ..color = outline.withValues(alpha: .75)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
+    canvas.drawCircle(
+      Offset(w * .18, h * .5),
+      h * (isBass ? .11 : .14),
+      Paint()..color = outline.withValues(alpha: .25),
+    );
+    for (var fret = 0; fret < 7; fret++) {
+      final x = w * (.38 + fret * .065);
+      canvas.drawLine(
+        Offset(x, h * .35),
+        Offset(x, h * .65),
+        Paint()
+          ..color = outline.withValues(alpha: .35)
+          ..strokeWidth = 1,
+      );
+    }
+    for (var i = 0; i < stringCount; i++) {
+      final y =
+          h * .39 + h * .22 * (stringCount <= 1 ? .5 : i / (stringCount - 1));
+      final active = activeStrings.contains(i);
+      canvas.drawLine(
+        Offset(w * .13, y),
+        Offset(w * .93, y),
+        Paint()
+          ..color = active ? accent : outline.withValues(alpha: .55)
+          ..strokeWidth = active ? 2.5 : 1
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(InstrumentStringPainter old) =>
+      old.stringCount != stringCount ||
+      old.isBass != isBass ||
+      old.accent != accent ||
+      old.outline != outline ||
+      old.surface != surface ||
+      old.activeStrings.length != activeStrings.length ||
+      !old.activeStrings.containsAll(activeStrings);
 }
 
 class _StatusMessage extends StatelessWidget {

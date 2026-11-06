@@ -203,136 +203,206 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
   Widget build(BuildContext context) {
     final tab = widget.tab;
     final theme = Theme.of(context);
-    final stringSpacing = _baseStringSpacing * _scale;
-    final trackHeight = _topPadding * 2 + (tab.stringCount - 1) * stringSpacing;
+    final textScale = (MediaQuery.textScalerOf(context).scale(12) / 12).clamp(
+      1.0,
+      2.5,
+    );
+    final stringSpacing = _baseStringSpacing * _scale * textScale;
+    final topPadding = _topPadding * textScale;
+    final trackHeight = topPadding * 2 + (tab.stringCount - 1) * stringSpacing;
     return Scaffold(
       appBar: AppBar(title: Text('Practice · ${tab.title}')),
       body: !_timeline.hasReliableTiming
           ? _StaticPracticeTab(tab: tab)
-          : Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: ValueListenableBuilder<double>(
-                          valueListenable: _elapsedBeats,
-                          builder: (context, elapsed, _) => Text(
-                            'Measure ${_currentMeasureNumber(elapsed)} of '
-                            '${tab.measures.isEmpty ? 0 : tab.measures.last.number}',
-                            style: theme.textTheme.labelLarge,
-                          ),
-                        ),
-                      ),
-                      if (_metronome)
-                        ValueListenableBuilder<bool>(
-                          key: const ValueKey('practice-metronome-flash'),
-                          valueListenable: _metronomeFlash,
-                          builder: (context, flashing, _) => AnimatedContainer(
-                            duration: const Duration(milliseconds: 80),
-                            width: 10,
-                            height: 10,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: flashing
-                                  ? theme.colorScheme.primary
-                                  : theme.colorScheme.outlineVariant,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                if (_measureCount > 1)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-                    child: _SectionRangeControl(
-                      range: _sectionIndexRange,
-                      measureCount: _measureCount,
-                      measureNumbers: _timeline.measures
-                          .map((marker) => marker.number)
-                          .toList(),
-                      isWholeSong: _isWholeSongSelected,
-                      onChanged: _onSectionChanged,
-                      onReset: _resetSection,
-                    ),
-                  ),
-                Expanded(
-                  child: Center(
-                    child: SizedBox(
-                      height: trackHeight,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _StringLabelColumn(
-                            tab: tab,
-                            topPadding: _topPadding,
-                            stringSpacing: stringSpacing,
-                          ),
-                          Expanded(
-                            child: GestureDetector(
-                              key: const ValueKey('practice-track'),
-                              behavior: HitTestBehavior.opaque,
-                              onHorizontalDragUpdate: (details) =>
-                                  _seekByPixels(details.delta.dx),
-                              child: ClipRect(
+          : LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: IntrinsicHeight(
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                          child: Row(
+                            children: [
+                              Expanded(
                                 child: ValueListenableBuilder<double>(
                                   valueListenable: _elapsedBeats,
-                                  builder: (context, elapsed, _) =>
-                                      LayoutBuilder(
-                                        builder: (context, constraints) =>
-                                            CustomPaint(
-                                              size: Size(
-                                                constraints.maxWidth,
-                                                trackHeight,
-                                              ),
-                                              painter: _PracticeTrackPainter(
-                                                stringCount: tab.stringCount,
-                                                events: _timeline.events,
-                                                measures: _timeline.measures,
-                                                elapsedBeats: elapsed,
-                                                pixelsPerBeat:
-                                                    _basePixelsPerBeat * _scale,
-                                                playheadX: _playheadX,
-                                                stringSpacing: stringSpacing,
-                                                topPadding: _topPadding,
-                                                colorScheme: theme.colorScheme,
-                                                sectionStartBeat:
-                                                    _isWholeSongSelected
-                                                    ? null
-                                                    : _loopStartBeat,
-                                                sectionEndBeat:
-                                                    _isWholeSongSelected
-                                                    ? null
-                                                    : _sectionEndBeat,
-                                              ),
-                                            ),
+                                  builder: (context, elapsed, _) => Text(
+                                    'Measure ${_currentMeasureNumber(elapsed)} of '
+                                    '${tab.measures.isEmpty ? 0 : tab.measures.last.number}',
+                                    style: theme.textTheme.labelLarge,
+                                  ),
+                                ),
+                              ),
+                              if (_metronome)
+                                ValueListenableBuilder<bool>(
+                                  key: const ValueKey(
+                                    'practice-metronome-flash',
+                                  ),
+                                  valueListenable: _metronomeFlash,
+                                  builder: (context, flashing, _) =>
+                                      AnimatedContainer(
+                                        duration: const Duration(
+                                          milliseconds: 80,
+                                        ),
+                                        width: 10,
+                                        height: 10,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: flashing
+                                              ? theme.colorScheme.primary
+                                              : theme
+                                                    .colorScheme
+                                                    .outlineVariant,
+                                        ),
                                       ),
                                 ),
+                            ],
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                          child: ValueListenableBuilder<double>(
+                            valueListenable: _elapsedBeats,
+                            builder: (context, elapsed, _) =>
+                                LinearProgressIndicator(
+                                  key: const ValueKey('practice-progress'),
+                                  value: (elapsed / _totalBeats).clamp(
+                                    0.0,
+                                    1.0,
+                                  ),
+                                  minHeight: 5,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                          ),
+                        ),
+                        if (_measureCount > 1)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                            child: _SectionRangeControl(
+                              range: _sectionIndexRange,
+                              measureCount: _measureCount,
+                              measureNumbers: _timeline.measures
+                                  .map((marker) => marker.number)
+                                  .toList(),
+                              isWholeSong: _isWholeSongSelected,
+                              onChanged: _onSectionChanged,
+                              onReset: _resetSection,
+                            ),
+                          ),
+                        Expanded(
+                          child: Center(
+                            child: SizedBox(
+                              height: trackHeight,
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _StringLabelColumn(
+                                    tab: tab,
+                                    topPadding: topPadding,
+                                    stringSpacing: stringSpacing,
+                                  ),
+                                  Expanded(
+                                    child: GestureDetector(
+                                      key: const ValueKey('practice-track'),
+                                      behavior: HitTestBehavior.opaque,
+                                      onHorizontalDragUpdate: (details) =>
+                                          _seekByPixels(details.delta.dx),
+                                      child: ClipRect(
+                                        child: ValueListenableBuilder<double>(
+                                          valueListenable: _elapsedBeats,
+                                          builder: (context, elapsed, _) => LayoutBuilder(
+                                            builder: (context, constraints) => Stack(
+                                              children: [
+                                                CustomPaint(
+                                                  size: Size(
+                                                    constraints.maxWidth,
+                                                    trackHeight,
+                                                  ),
+                                                  painter:
+                                                      _PracticeTrackPainter(
+                                                        stringCount:
+                                                            tab.stringCount,
+                                                        events:
+                                                            _timeline.events,
+                                                        measures:
+                                                            _timeline.measures,
+                                                        elapsedBeats: elapsed,
+                                                        pixelsPerBeat:
+                                                            _basePixelsPerBeat *
+                                                            _scale,
+                                                        playheadX: _playheadX,
+                                                        stringSpacing:
+                                                            stringSpacing,
+                                                        topPadding: topPadding,
+                                                        colorScheme:
+                                                            theme.colorScheme,
+                                                        textScale: textScale,
+                                                        sectionStartBeat:
+                                                            _isWholeSongSelected
+                                                            ? null
+                                                            : _loopStartBeat,
+                                                        sectionEndBeat:
+                                                            _isWholeSongSelected
+                                                            ? null
+                                                            : _sectionEndBeat,
+                                                      ),
+                                                ),
+                                                Positioned(
+                                                  left: _playheadX,
+                                                  top: 0,
+                                                  bottom: 0,
+                                                  child: IgnorePointer(
+                                                    child: Container(
+                                                      key: const ValueKey(
+                                                        'practice-hit-line',
+                                                      ),
+                                                      width: 3,
+                                                      color:
+                                                          theme.brightness ==
+                                                              Brightness.dark
+                                                          ? const Color(
+                                                              0xFF54E8D5,
+                                                            )
+                                                          : const Color(
+                                                              0xFF006C65,
+                                                            ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                        _PracticeControls(
+                          playing: _playing,
+                          looping: _looping,
+                          metronome: _metronome,
+                          speedPercent: _speedPercent,
+                          effectiveBpm: _bpm,
+                          scale: _scale,
+                          onPlayPause: () => _playing ? _pause() : _play(),
+                          onRestart: _restart,
+                          onToggleLoop: _toggleLoop,
+                          onToggleMetronome: _toggleMetronome,
+                          onSpeedChanged: _onSpeedChanged,
+                          onScaleChanged: (value) =>
+                              setState(() => _scale = value),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                _PracticeControls(
-                  playing: _playing,
-                  looping: _looping,
-                  metronome: _metronome,
-                  speedPercent: _speedPercent,
-                  effectiveBpm: _bpm,
-                  scale: _scale,
-                  onPlayPause: () => _playing ? _pause() : _play(),
-                  onRestart: _restart,
-                  onToggleLoop: _toggleLoop,
-                  onToggleMetronome: _toggleMetronome,
-                  onSpeedChanged: _onSpeedChanged,
-                  onScaleChanged: (value) => setState(() => _scale = value),
-                ),
-              ],
+              ),
             ),
     );
   }
@@ -488,18 +558,38 @@ class _StringLabelColumn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final height = topPadding * 2 + (tab.stringCount - 1) * stringSpacing;
+    final factor = (MediaQuery.textScalerOf(context).scale(12) / 12).clamp(
+      1.0,
+      2.5,
+    );
+    final badgeSize = 26 * factor;
     return SizedBox(
-      width: 28,
+      width: 34 * factor,
       height: height,
       child: Stack(
         children: [
           for (var i = 0; i < tab.stringCount; i++)
             Positioned(
               left: 0,
-              top: topPadding + i * stringSpacing - 8,
-              child: Text(
-                tab.tuning.reversed.elementAt(i),
-                style: Theme.of(context).textTheme.labelSmall,
+              top: topPadding + i * stringSpacing - badgeSize / 2,
+              child: Container(
+                width: badgeSize,
+                height: badgeSize,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Theme.of(context).colorScheme.surfaceContainerLow,
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                ),
+                child: Text(
+                  i < tab.tuning.length
+                      ? tab.tuning.reversed.elementAt(i)
+                      : '?',
+                  style: Theme.of(context).textTheme.labelSmall
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                ),
               ),
             ),
         ],
@@ -519,6 +609,7 @@ class _PracticeTrackPainter extends CustomPainter {
     required this.stringSpacing,
     required this.topPadding,
     required this.colorScheme,
+    required this.textScale,
     this.sectionStartBeat,
     this.sectionEndBeat,
   });
@@ -532,6 +623,7 @@ class _PracticeTrackPainter extends CustomPainter {
   final double stringSpacing;
   final double topPadding;
   final ColorScheme colorScheme;
+  final double textScale;
 
   /// When set, highlights the selected practice section (a measure range)
   /// on the track, in beats, without the end-of-track padding.
@@ -540,6 +632,19 @@ class _PracticeTrackPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()..color = colorScheme.surfaceContainerLow,
+    );
+    for (var s = 0; s < stringCount; s++) {
+      if (s.isOdd) {
+        final y = topPadding + s * stringSpacing;
+        canvas.drawRect(
+          Rect.fromLTWH(0, y - stringSpacing / 2, size.width, stringSpacing),
+          Paint()..color = colorScheme.onSurface.withValues(alpha: .025),
+        );
+      }
+    }
     final sectionStart = sectionStartBeat;
     final sectionEnd = sectionEndBeat;
     if (sectionStart != null && sectionEnd != null) {
@@ -587,17 +692,8 @@ class _PracticeTrackPainter extends CustomPainter {
       textPainter.paint(canvas, Offset(x + 3, 2));
     }
 
-    final playheadPaint = Paint()
-      ..color = colorScheme.primary
-      ..strokeWidth = 2;
-    canvas.drawLine(
-      Offset(playheadX, 0),
-      Offset(playheadX, size.height),
-      playheadPaint,
-    );
-
-    const minNoteWidth = 22.0;
-    const noteHeight = 20.0;
+    final minNoteWidth = 22.0 * textScale;
+    final noteHeight = 20.0 * textScale;
     for (final event in events) {
       final startX =
           playheadX + (event.startBeat - elapsedBeats) * pixelsPerBeat;
@@ -632,11 +728,18 @@ class _PracticeTrackPainter extends CustomPainter {
         const Radius.circular(5),
       );
       canvas.drawRRect(rect, Paint()..color = background);
+      canvas.drawRRect(
+        rect,
+        Paint()
+          ..color = (active ? colorScheme.primary : colorScheme.outlineVariant)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = active ? 1.5 : 1,
+      );
 
       textPainter.text = TextSpan(
         text: '${event.fret}',
         style: TextStyle(
-          fontSize: 12,
+          fontSize: 12 * textScale,
           fontWeight: FontWeight.w600,
           fontFamily: 'monospace',
           color: foreground,
@@ -654,7 +757,10 @@ class _PracticeTrackPainter extends CustomPainter {
       oldDelegate.events != events ||
       oldDelegate.measures != measures ||
       oldDelegate.sectionStartBeat != sectionStartBeat ||
-      oldDelegate.sectionEndBeat != sectionEndBeat;
+      oldDelegate.sectionEndBeat != sectionEndBeat ||
+      oldDelegate.colorScheme != colorScheme ||
+      oldDelegate.stringSpacing != stringSpacing ||
+      oldDelegate.textScale != textScale;
 }
 
 class _PracticeControls extends StatelessWidget {
@@ -687,7 +793,10 @@ class _PracticeControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = Theme.of(context).colorScheme.primary;
+    final theme = Theme.of(context);
+    final accent = theme.brightness == Brightness.dark
+        ? const Color(0xFF54E8D5)
+        : const Color(0xFF006C65);
     return SafeArea(
       top: false,
       child: Padding(
@@ -696,6 +805,7 @@ class _PracticeControls extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 IconButton(
                   tooltip: 'Restart',
@@ -705,6 +815,12 @@ class _PracticeControls extends StatelessWidget {
                 IconButton.filled(
                   key: const ValueKey('practice-play-pause'),
                   tooltip: playing ? 'Pause' : 'Play',
+                  style: IconButton.styleFrom(
+                    backgroundColor: accent,
+                    foregroundColor: theme.brightness == Brightness.dark
+                        ? const Color(0xFF052723)
+                        : Colors.white,
+                  ),
                   onPressed: onPlayPause,
                   icon: Icon(playing ? Icons.pause : Icons.play_arrow),
                 ),
@@ -722,60 +838,63 @@ class _PracticeControls extends StatelessWidget {
                 ),
               ],
             ),
-            Row(
+            const SizedBox(height: 4),
+            Text(
+              '${speedPercent.round()}% · ${effectiveBpm.round()} BPM',
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 4,
+              runSpacing: 2,
               children: [
-                const Icon(Icons.speed, size: 18),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Row(
-                    children: [
-                      for (final speed in const [25, 50, 75, 100, 150])
-                        Expanded(
-                          child: InkWell(
-                            key: ValueKey('practice-speed-$speed'),
-                            onTap: () => onSpeedChanged(speed.toDouble()),
-                            borderRadius: BorderRadius.circular(8),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  '$speed%',
-                                  style: Theme.of(context).textTheme.labelSmall
-                                      ?.copyWith(
-                                        color: speedPercent == speed
-                                            ? accent
-                                            : null,
-                                        fontWeight: speedPercent == speed
-                                            ? FontWeight.bold
-                                            : FontWeight.normal,
-                                      ),
-                                ),
-                                const SizedBox(height: 3),
-                                Container(
-                                  height: speedPercent == speed ? 12 : 8,
-                                  width: 3,
-                                  decoration: BoxDecoration(
-                                    color: speedPercent == speed
-                                        ? accent
-                                        : Theme.of(context).colorScheme.outline,
-                                    borderRadius: BorderRadius.circular(2),
-                                  ),
-                                ),
-                              ],
-                            ),
+                for (final speed in const [25, 50, 75, 100, 150])
+                  Semantics(
+                    button: true,
+                    selected: speedPercent == speed,
+                    label: '$speed% speed',
+                    child: InkWell(
+                      key: ValueKey('practice-speed-$speed'),
+                      onTap: () => onSpeedChanged(speed.toDouble()),
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        width:
+                            58 *
+                            (MediaQuery.textScalerOf(context).scale(14) / 14)
+                                .clamp(1.0, 2.5),
+                        constraints: const BoxConstraints(
+                          minWidth: 50,
+                          minHeight: 44,
+                        ),
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: speedPercent == speed
+                              ? accent.withValues(alpha: .15)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: speedPercent == speed
+                                ? accent
+                                : Theme.of(context).colorScheme.outlineVariant,
                           ),
                         ),
-                    ],
+                        child: Text(
+                          '$speed%',
+                          style: Theme.of(context).textTheme.labelMedium
+                              ?.copyWith(
+                                color: speedPercent == speed ? accent : null,
+                                fontWeight: speedPercent == speed
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                SizedBox(
-                  width: 88,
-                  child: Text(
-                    '${speedPercent.round()}% · ${effectiveBpm.round()} BPM',
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                ),
               ],
             ),
             Row(
@@ -784,6 +903,8 @@ class _PracticeControls extends StatelessWidget {
                 Expanded(
                   child: Slider(
                     value: scale,
+                    semanticFormatterCallback: (value) =>
+                        'Zoom ${(value * 100).round()}%',
                     min: 0.6,
                     max: 1.8,
                     onChanged: onScaleChanged,
