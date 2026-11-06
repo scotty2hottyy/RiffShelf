@@ -73,6 +73,22 @@ void emitPitch(FakeInput input, double hz) {
 }
 
 void main() {
+  test('semicircular dial maps the visible cents range and in-tune arc', () {
+    expect(CentsDialPainter.angleForCents(-50), closeTo(-math.pi / 2, 1e-9));
+    expect(CentsDialPainter.angleForCents(0), 0);
+    expect(CentsDialPainter.angleForCents(50), closeTo(math.pi / 2, 1e-9));
+    expect(CentsDialPainter.angleForCents(-100), closeTo(-math.pi / 2, 1e-9));
+    expect(CentsDialPainter.angleForCents(100), closeTo(math.pi / 2, 1e-9));
+    expect(
+      CentsDialPainter.inTuneStart,
+      closeTo(CentsDialPainter.angleForCents(-5), 1e-9),
+    );
+    expect(
+      CentsDialPainter.inTuneStart + CentsDialPainter.inTuneSweep,
+      closeTo(CentsDialPainter.angleForCents(5), 1e-9),
+    );
+  });
+
   group('Tuner tunings', () {
     test('preset notes follow low-to-high guitar and bass string order', () {
       expect(TunerPresets.guitarStandard.notes, [
@@ -307,6 +323,29 @@ void main() {
         tester.widget<Text>(find.byKey(const Key('tuner-target-note'))).data,
         'A2',
       );
+      final dial =
+          tester
+                  .widget<CustomPaint>(
+                    find.byKey(const Key('tuner-cents-dial')),
+                  )
+                  .painter!
+              as CentsDialPainter;
+      expect(dial.cents, closeTo(0, 2));
+      expect(dial.inTuneColor, isNot(dial.trackColor));
+      expect(find.text('In tune'), findsOneWidget);
+
+      input.controller.add(pcm(Float64List(22050)));
+      await tester.pump();
+      final emptyDial =
+          tester
+                  .widget<CustomPaint>(
+                    find.byKey(const Key('tuner-cents-dial')),
+                  )
+                  .painter!
+              as CentsDialPainter;
+      expect(emptyDial.cents, isNull);
+      expect(find.text('Play a string'), findsOneWidget);
+      expect(find.textContaining('Detected'), findsNothing);
       await tester.tap(find.text('Stop'));
       await tester.pumpAndSettle();
     });

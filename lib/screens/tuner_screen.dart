@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../core/models/tuning.dart';
@@ -482,15 +484,19 @@ class _MeterCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
-          SizedBox(
-            height: 56,
-            width: double.infinity,
-            child: CustomPaint(
-              painter: _CentsPainter(
-                cents: reading?.targetCents,
-                color: color,
-                trackColor: theme.colorScheme.onSurfaceVariant.withValues(
-                  alpha: 0.35,
+          LayoutBuilder(
+            builder: (context, constraints) => SizedBox(
+              height: (constraints.maxWidth * 0.52).clamp(120.0, 220.0),
+              width: double.infinity,
+              child: CustomPaint(
+                key: const Key('tuner-cents-dial'),
+                painter: CentsDialPainter(
+                  cents: reading?.targetCents,
+                  needleColor: color,
+                  trackColor: theme.colorScheme.onSurfaceVariant.withValues(
+                    alpha: 0.35,
+                  ),
+                  inTuneColor: accent,
                 ),
               ),
             ),
@@ -617,44 +623,91 @@ class _StringBadge extends StatelessWidget {
   }
 }
 
-class _CentsPainter extends CustomPainter {
-  _CentsPainter({
+class CentsDialPainter extends CustomPainter {
+  CentsDialPainter({
     required this.cents,
-    required this.color,
+    required this.needleColor,
     required this.trackColor,
+    required this.inTuneColor,
   });
   final double? cents;
-  final Color color;
+  final Color needleColor;
   final Color trackColor;
+  final Color inTuneColor;
+
+  /// Radians from straight up; values beyond the visible scale stop at its ends.
+  static double angleForCents(double cents) =>
+      cents.clamp(-50.0, 50.0) / 50 * math.pi / 2;
+
+  static const double inTuneStart = -math.pi / 20;
+  static const double inTuneSweep = math.pi / 10;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final track = Paint()
-      ..color = trackColor
-      ..strokeWidth = 2;
-    final midY = size.height / 2;
-    final halfWidth = size.width / 2 - 4;
-    for (var i = -5; i <= 5; i++) {
-      final x = size.width / 2 + i * halfWidth / 5;
-      final h = i == 0 ? 22.0 : (i.isEven ? 12.0 : 7.0);
-      canvas.drawLine(Offset(x, midY - h), Offset(x, midY + h), track);
+    final pivot = Offset(size.width / 2, size.height - 8);
+    final radius = math.min(size.width / 2 - 18, size.height - 20);
+    if (radius <= 0) return;
+    final arc = Rect.fromCircle(center: pivot, radius: radius);
+    canvas.drawArc(
+      arc,
+      math.pi,
+      math.pi,
+      false,
+      Paint()
+        ..color = trackColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 5
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawArc(
+      arc,
+      3 * math.pi / 2 + inTuneStart,
+      inTuneSweep,
+      false,
+      Paint()
+        ..color = inTuneColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 6
+        ..strokeCap = StrokeCap.round,
+    );
+    for (var tick = -50; tick <= 50; tick += 10) {
+      final angle = angleForCents(tick.toDouble());
+      final direction = Offset(math.sin(angle), -math.cos(angle));
+      final length = tick == 0
+          ? 14.0
+          : tick % 50 == 0
+          ? 12.0
+          : 8.0;
+      final paint = Paint()
+        ..color = tick == 0 ? inTuneColor : trackColor
+        ..strokeWidth = tick == 0 ? 3 : 2
+        ..strokeCap = StrokeCap.round;
+      canvas.drawLine(
+        pivot + direction * (radius - length - 7),
+        pivot + direction * (radius - 7),
+        paint,
+      );
     }
     final value = cents;
-    if (value == null) return;
-    final x = size.width / 2 + (value.clamp(-50.0, 50.0) / 50) * halfWidth;
+    if (value == null || !value.isFinite) return;
+    final angle = angleForCents(value);
     canvas.drawLine(
-      Offset(x, 0),
-      Offset(x, size.height),
+      pivot,
+      pivot + Offset(math.sin(angle), -math.cos(angle)) * (radius - 25),
       Paint()
-        ..color = color
+        ..color = needleColor
         ..strokeWidth = 4
         ..strokeCap = StrokeCap.round,
     );
+    canvas.drawCircle(pivot, 6, Paint()..color = needleColor);
   }
 
   @override
-  bool shouldRepaint(_CentsPainter old) =>
-      old.cents != cents || old.color != color;
+  bool shouldRepaint(CentsDialPainter old) =>
+      old.cents != cents ||
+      old.needleColor != needleColor ||
+      old.trackColor != trackColor ||
+      old.inTuneColor != inTuneColor;
 }
 
 class _StatusMessage extends StatelessWidget {

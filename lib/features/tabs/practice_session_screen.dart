@@ -39,12 +39,9 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
   // "Speed" is a percentage of the tab's own authored tempo (or 100 BPM if
   // none was recorded), rather than a raw BPM value, so practicing slower
   // never requires knowing or fiddling with absolute tempo numbers.
-  late final double _baseBpm = (widget.tab.bpm ?? 100).toDouble().clamp(
-    20,
-    300,
-  );
+  late final double _baseBpm = (widget.tab.bpm ?? 100).toDouble();
   double _speedPercent = 100;
-  double get _bpm => (_baseBpm * _speedPercent / 100).clamp(10, 400);
+  double get _bpm => _baseBpm * _speedPercent / 100;
 
   // The practice "section": a measure range to loop over. Defaults to the
   // whole song (first measure through the last).
@@ -728,22 +725,54 @@ class _PracticeControls extends StatelessWidget {
             Row(
               children: [
                 const Icon(Icons.speed, size: 18),
+                const SizedBox(width: 8),
                 Expanded(
-                  child: Slider(
-                    key: const ValueKey('practice-speed-slider'),
-                    value: speedPercent,
-                    min: 50,
-                    max: 150,
-                    divisions: 100,
-                    label: '${speedPercent.round()}%',
-                    onChanged: onSpeedChanged,
+                  child: Row(
+                    children: [
+                      for (final speed in const [25, 50, 75, 100, 150])
+                        Expanded(
+                          child: InkWell(
+                            key: ValueKey('practice-speed-$speed'),
+                            onTap: () => onSpeedChanged(speed.toDouble()),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  '$speed%',
+                                  style: Theme.of(context).textTheme.labelSmall
+                                      ?.copyWith(
+                                        color: speedPercent == speed
+                                            ? accent
+                                            : null,
+                                        fontWeight: speedPercent == speed
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
+                                      ),
+                                ),
+                                const SizedBox(height: 3),
+                                Container(
+                                  height: speedPercent == speed ? 12 : 8,
+                                  width: 3,
+                                  decoration: BoxDecoration(
+                                    color: speedPercent == speed
+                                        ? accent
+                                        : Theme.of(context).colorScheme.outline,
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
+                const SizedBox(width: 8),
                 SizedBox(
-                  width: 96,
+                  width: 88,
                   child: Text(
-                    '${speedPercent.round()}% · '
-                    '${effectiveBpm.round()} BPM',
+                    '${speedPercent.round()}% · ${effectiveBpm.round()} BPM',
                     style: Theme.of(context).textTheme.labelSmall,
                   ),
                 ),

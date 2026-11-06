@@ -7,7 +7,7 @@ import 'package:riffshelf/core/models/tab_structure.dart';
 import 'package:riffshelf/features/tabs/practice_session_screen.dart';
 
 void main() {
-  SavedTab buildTab() => SavedTab(
+  SavedTab buildTab({int bpm = 120}) => SavedTab(
     title: 'Riff',
     artist: 'Test Artist',
     source: 'Test',
@@ -15,7 +15,7 @@ void main() {
     instrument: InstrumentType.guitar,
     stringCount: 6,
     tuning: const ['E', 'A', 'D', 'G', 'B', 'E'],
-    bpm: 120,
+    bpm: bpm,
     measures: List.generate(
       4,
       (i) => TabMeasure(
@@ -102,10 +102,7 @@ void main() {
         const Offset(-100, 0),
       );
       await tester.pump();
-      await tester.drag(
-        find.byKey(const ValueKey('practice-speed-slider')),
-        const Offset(30, 0),
-      );
+      await tester.tap(find.byKey(const ValueKey('practice-speed-75')));
       await tester.pump();
       expect(tester.takeException(), isNull);
     }
@@ -199,21 +196,56 @@ void main() {
     expect(find.byIcon(Icons.play_arrow), findsOneWidget);
   });
 
-  testWidgets('the speed slider rescales the effective BPM from the tab\'s '
-      'own tempo', (tester) async {
+  testWidgets('all five speed positions use the exact tab tempo multiplier', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       MaterialApp(home: PracticeSessionScreen(tab: buildTab())),
     );
     expect(find.text('100% · 120 BPM'), findsOneWidget);
 
-    await tester.drag(
-      find.byKey(const ValueKey('practice-speed-slider')),
-      const Offset(-500, 0),
-    );
-    await tester.pump();
+    for (final (speed, bpm) in [
+      (25, 30),
+      (50, 60),
+      (75, 90),
+      (100, 120),
+      (150, 180),
+    ]) {
+      await tester.tap(find.byKey(ValueKey('practice-speed-$speed')));
+      await tester.pump();
+      expect(find.text('$speed% · $bpm BPM'), findsOneWidget);
+    }
+  });
 
-    expect(find.text('100% · 120 BPM'), findsNothing);
-    expect(find.text('50% · 60 BPM'), findsOneWidget);
+  testWidgets('changing speed during playback keeps the current measure', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: PracticeSessionScreen(tab: buildTab())),
+    );
+    await tester.tap(find.byKey(const ValueKey('practice-play-pause')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 2500));
+    expect(find.text('Measure 2 of 4'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('practice-speed-25')));
+    await tester.pump();
+    expect(find.text('Measure 2 of 4'), findsOneWidget);
+    expect(find.byIcon(Icons.pause), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Measure 2 of 4'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('practice-speed-150')));
+    await tester.pump();
+    expect(find.text('Measure 2 of 4'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 900));
+    expect(find.text('Measure 3 of 4'), findsOneWidget);
+  });
+
+  testWidgets('150% is not capped for a fast authored tempo', (tester) async {
+    final tab = buildTab(bpm: 300);
+    await tester.pumpWidget(MaterialApp(home: PracticeSessionScreen(tab: tab)));
+    await tester.tap(find.byKey(const ValueKey('practice-speed-150')));
+    await tester.pump();
+    expect(find.text('150% · 450 BPM'), findsOneWidget);
   });
 
   testWidgets('looping wraps playback back to the start instead of pausing', (
@@ -224,10 +256,7 @@ void main() {
     );
 
     // Max out speed so the short timeline wraps around quickly.
-    await tester.drag(
-      find.byKey(const ValueKey('practice-speed-slider')),
-      const Offset(500, 0),
-    );
+    await tester.tap(find.byKey(const ValueKey('practice-speed-150')));
     await tester.pump();
 
     await tester.tap(find.byKey(const ValueKey('practice-loop-toggle')));
@@ -364,10 +393,7 @@ void main() {
       MaterialApp(home: PracticeSessionScreen(tab: buildTab())),
     );
 
-    await tester.drag(
-      find.byKey(const ValueKey('practice-speed-slider')),
-      const Offset(500, 0),
-    );
+    await tester.tap(find.byKey(const ValueKey('practice-speed-150')));
     await tester.pump();
 
     await tester.tap(find.byKey(const ValueKey('practice-play-pause')));
