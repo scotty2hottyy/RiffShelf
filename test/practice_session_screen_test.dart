@@ -556,4 +556,30 @@ void main() {
       },
     );
   }
+  testWidgets('practice toggles expose their on-off state to accessibility', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: PracticeSessionScreen(tab: buildTab())),
+    );
+    final loop = find.byKey(const ValueKey('practice-loop-toggle'));
+    Semantics state() => tester.widget<Semantics>(
+      find
+          .ancestor(
+            of: loop,
+            matching: find.byWidgetPredicate(
+              (w) => w is Semantics && w.properties.toggled != null,
+            ),
+          )
+          .first,
+    );
+    expect(state().properties.toggled, isFalse);
+    await tester.tap(loop);
+    await tester.pump();
+    expect(state().properties.toggled, isTrue);
+    expect(
+      tester.getSize(find.byKey(const ValueKey('practice-speed-100'))).height,
+      greaterThanOrEqualTo(48),
+    );
+  });
 }

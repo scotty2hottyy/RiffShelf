@@ -311,9 +311,18 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
             response!.failures.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: Text(
-              'Some providers are unavailable: ${response!.failures.map((f) => f.provider).join(', ')}',
-              style: theme.textTheme.bodyMedium?.copyWith(color: muted),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Some providers are unavailable: ${response!.failures.map((f) => f.provider).join(', ')}',
+                  style: theme.textTheme.bodyMedium?.copyWith(color: muted),
+                ),
+                TextButton(
+                  onPressed: loading ? null : search,
+                  child: const Text('Retry providers'),
+                ),
+              ],
             ),
           ),
         if (response != null)
@@ -480,7 +489,7 @@ class _SongCard extends StatelessWidget {
                           style: OutlinedButton.styleFrom(
                             foregroundColor: accent,
                             side: BorderSide(color: accent),
-                            visualDensity: VisualDensity.compact,
+                            minimumSize: const Size(48, 48),
                           ),
                           icon: const Icon(Icons.download_rounded, size: 18),
                           label: const Text('Save'),
@@ -525,7 +534,10 @@ class _PreviewScreenState extends State<_PreviewScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not save this tab.')),
+          SnackBar(
+            content: const Text('Could not save this tab. Please try again.'),
+            action: SnackBarAction(label: 'Retry', onPressed: save),
+          ),
         );
       }
     } finally {

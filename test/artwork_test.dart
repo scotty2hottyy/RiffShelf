@@ -22,8 +22,10 @@ const png =
 class MemoryRepo implements TabRepository {
   MemoryRepo(this.tab);
   SavedTab tab;
+  bool failSave = false;
   @override
   Future<SavedTab> save(SavedTab value) async {
+    if (failSave) throw StateError('Storage unavailable');
     tab = value;
     return value;
   }
@@ -52,6 +54,19 @@ class FakeArtworkService extends ArtworkService {
   @override
   Future<String> select(AlbumCandidate album) async =>
       jsonEncode({'release_id': album.id, 'title': album.title});
+}
+
+class FailingDownloadArtworkService extends ArtworkService {
+  FailingDownloadArtworkService() : super(baseUrl: 'http://localhost');
+  int failures = 0;
+  @override
+  Future<List<AlbumCandidate>> candidates(String artist, String title) async =>
+      const [AlbumCandidate(id1, 'First', 'Artist', '2000')];
+  @override
+  Future<String> select(AlbumCandidate album) async {
+    failures++;
+    throw const FormatException('Artwork unavailable');
+  }
 }
 
 void main() {
@@ -217,4 +232,102 @@ void main() {
       throwsFormatException,
     );
   });
+  testWidgets(
+    'unconfigured backend explains how to recover without affecting the tab',
+    (tester) async {
+      final memory = MemoryRepo(tab);
+      final offline = ArtworkService(
+        baseUrl: '',
+        client: MockClient((_) async => throw StateError('unexpected HTTP')),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TabDetailScreen(
+            tab: tab,
+            repository: memory,
+            artworkService: offline,
+          ),
+        ),
+      );
+      await tester.tap(find.text('Choose album'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('configured backend'), findsOneWidget);
+      expect(find.textContaining('E|--0--'), findsOneWidget);
+      expect(memory.tab.artwork, isNull);
+    },
+  );
+
+  testWidgets('failed artwork download offers retry and keeps tab available', (
+    tester,
+  ) async {
+    final memory = MemoryRepo(tab);
+    final failing = FailingDownloadArtworkService();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TabDetailScreen(
+          tab: tab,
+          repository: memory,
+          artworkService: failing,
+        ),
+      ),
+    );
+    await tester.tap(find.text('Choose album'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('First — Artist'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+    expect(failing.failures, 1);
+    expect(find.textContaining('artwork download failed'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+    expect(memory.tab.artwork, isNull);
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('First — Artist'), findsOneWidget);
+  });
+  test('download HTTP failure is surfaced', () async {
+    final failing = ArtworkService(
+      baseUrl: 'http://localhost',
+      cacheDirectory: dir,
+      client: MockClient((request) async {
+        if (request.url.host == 'localhost') {
+          return http.Response(
+            jsonEncode({
+              'artwork': {'thumbnail_500': 'https://archive.org/a.png'},
+            }),
+            200,
+          );
+        }
+        return http.Response('unavailable', 503);
+      }),
+    );
+    await expectLater(
+      failing.select(const AlbumCandidate(id1, 'First', 'Artist', '2000')),
+      throwsFormatException,
+    );
+  });
+  testWidgets(
+    'album save failure reports storage issue and preserves selection',
+    (tester) async {
+      final memory = MemoryRepo(tab)..failSave = true;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TabDetailScreen(
+            tab: tab,
+            repository: memory,
+            artworkService: FakeArtworkService(),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Choose album'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('First — Artist'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Check storage'), findsOneWidget);
+      expect(find.text('Retry'), findsOneWidget);
+      expect(memory.tab.artwork, isNull);
+    },
+  );
 }

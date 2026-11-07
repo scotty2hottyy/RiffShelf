@@ -1,6 +1,6 @@
 # RiffShelf
 
-RiffShelf is a Flutter application for discovering, organizing, and practicing guitar and bass tablature on Android and iOS. Its initial navigation includes Discover, Practice, Tuner, Library, and Settings placeholder screens.
+RiffShelf is a Flutter application for discovering, organizing, and practicing guitar and bass tablature on Android and iOS. Its navigation includes Discover, Practice, Tuner, Library, and Settings.
 
 The bottom navigation keeps screens mounted while switching tabs and restores the selected tab when the app is restored. Screen functionality will be added in later milestones.
 

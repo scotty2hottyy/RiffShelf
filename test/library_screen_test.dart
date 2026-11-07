@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:riffshelf/core/theme_provider.dart';
 import 'package:riffshelf/features/artwork/album_art.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,15 +10,41 @@ import 'package:riffshelf/core/database/tab_repository.dart';
 import 'package:riffshelf/core/models/instrument_type.dart';
 import 'package:riffshelf/core/models/saved_tab.dart';
 import 'package:riffshelf/screens/library_screen.dart';
+import 'package:riffshelf/screens/practice_screen.dart';
+
+class FailingPicker extends FilePickerPlatform {
+  int calls = 0;
+  @override
+  Future<List<PlatformFile>> pickFiles({
+    String? dialogTitle,
+    String? initialDirectory,
+    FileType type = FileType.any,
+    List<String>? allowedExtensions,
+    Function(FilePickerStatus)? onFileLoading,
+    int compressionQuality = 0,
+    AndroidOptions androidOptions = const AndroidOptions(),
+    DarwinOptions darwinOptions = const DarwinOptions(),
+    WindowsOptions windowsOptions = const WindowsOptions(),
+    LinuxOptions linuxOptions = const LinuxOptions(),
+    WebOptions webOptions = const WebOptions(),
+  }) async {
+    calls++;
+    if (calls == 1) throw StateError('Picker unavailable');
+    return [];
+  }
+}
 
 class MemoryRepository implements TabRepository {
   final List<SavedTab> data = [];
   TabFilter lastFilter = const TabFilter();
+  bool failLoad = false;
+  bool failDelete = false;
   @override
   Future<List<SavedTab>> findTabs([
     TabFilter filter = const TabFilter(),
   ]) async {
     lastFilter = filter;
+    if (failLoad) throw StateError('storage failure');
     return data
         .where(
           (t) =>
@@ -45,7 +72,11 @@ class MemoryRepository implements TabRepository {
   @override
   Future<Set<String>> allTags() async => data.expand((t) => t.tags).toSet();
   @override
-  Future<void> delete(int id) async => data.removeWhere((t) => t.id == id);
+  Future<void> delete(int id) async {
+    if (failDelete) throw StateError('storage failure');
+    data.removeWhere((t) => t.id == id);
+  }
+
   @override
   Future<void> close() async {}
 }
@@ -266,5 +297,110 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.album_outlined), findsOneWidget);
+  });
+  testWidgets('library load and deletion failures offer recovery', (
+    tester,
+  ) async {
+    final repo = MemoryRepository()
+      ..data.add(tab())
+      ..failLoad = true;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: LibraryScreen(repository: repo)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Could not load your library'), findsOneWidget);
+    repo.failLoad = false;
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(find.text('Offline song'), findsOneWidget);
+    repo.failDelete = true;
+    await tester.tap(find.byTooltip('Tab options'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete').last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Could not delete tab'), findsOneWidget);
+    expect(repo.data, hasLength(1));
+    repo.failDelete = false;
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete').last);
+    await tester.pumpAndSettle();
+    expect(repo.data, isEmpty);
+  });
+  testWidgets('practice library error can be retried', (tester) async {
+    final repo = MemoryRepository()
+      ..data.add(tab())
+      ..failLoad = true;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: PracticeScreen(repository: repo)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Could not load your library'), findsOneWidget);
+    repo.failLoad = false;
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(find.text('Offline song'), findsOneWidget);
+  });
+  testWidgets('filter dialog works with large text on a small screen', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 640);
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    final repo = MemoryRepository()..data.add(tab());
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: LibraryScreen(repository: repo)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Filters'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Any instrument'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bass').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Any classification'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Electric').last);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.widgetWithText(TextField, 'Tags'));
+    await tester.enterText(find.widgetWithText(TextField, 'Tags'), 'jazz');
+    await tester.ensureVisible(find.text('Apply'));
+    await tester.tap(find.text('Apply'));
+    await tester.pumpAndSettle();
+    expect(repo.lastFilter.tags, {'jazz'});
+    expect(repo.lastFilter.instrument, InstrumentType.bass);
+    expect(repo.lastFilter.classification, InstrumentClassification.electric);
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets('failed import offers file picker recovery', (tester) async {
+    final previous = FilePickerPlatform.instance;
+    final picker = FailingPicker();
+    FilePickerPlatform.instance = picker;
+    addTearDown(() => FilePickerPlatform.instance = previous);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: LibraryScreen(repository: MemoryRepository())),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import Tab'));
+    await tester.pumpAndSettle();
+    expect(find.text('Could not import this file.'), findsOneWidget);
+    await tester.tap(find.text('Choose file'));
+    await tester.pumpAndSettle();
+    expect(picker.calls, 2);
   });
 }

@@ -136,8 +136,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
       final message = error is FormatException
           ? error.message
           : 'Could not import this file.';
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          action: SnackBarAction(label: 'Choose file', onPressed: importTab),
+        ),
+      );
     }
   }
 
@@ -148,7 +152,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not update favorite.')),
+          SnackBar(
+            content: const Text('Could not update favorite. Please try again.'),
+            action: SnackBarAction(
+              label: 'Retry',
+              onPressed: () => toggleFavorite(tab),
+            ),
+          ),
         );
       }
     }
@@ -178,9 +188,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
       if (mounted) refresh();
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Could not delete tab.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Could not delete tab. Please try again.'),
+            action: SnackBarAction(
+              label: 'Retry',
+              onPressed: () => deleteTab(tab),
+            ),
+          ),
+        );
       }
     }
   }
@@ -223,6 +239,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<InstrumentType?>(
+                  isExpanded: true,
                   initialValue: selectedInstrument,
                   decoration: const InputDecoration(labelText: 'Instrument'),
                   items: const [
@@ -246,6 +263,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   onChanged: (v) => update(() => selectedInstrument = v),
                 ),
                 DropdownButtonFormField<InstrumentClassification?>(
+                  isExpanded: true,
                   initialValue: selectedClassification,
                   decoration: const InputDecoration(
                     labelText: 'Classification',
@@ -484,9 +502,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ),
           ],
           const SizedBox(height: 20),
-          if (snapshot.hasError)
-            const Text('Could not load your library.')
-          else if (!snapshot.hasData)
+          if (snapshot.hasError) ...[
+            const Text(
+              'Could not load your library. Check storage and try again.',
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(onPressed: refresh, child: const Text('Retry')),
+            ),
+          ] else if (!snapshot.hasData)
             const Center(child: Text('Loading library…'))
           else if (snapshot.data!.isEmpty)
             const Padding(
@@ -627,14 +651,17 @@ class _LibraryCard extends StatelessWidget {
               ],
               Row(
                 children: [
-                  IconButton(
-                    tooltip: tab.isFavorite
-                        ? 'Remove favorite'
-                        : 'Add favorite',
-                    onPressed: onFavorite,
-                    icon: Icon(
-                      tab.isFavorite ? Icons.favorite : Icons.favorite_border,
-                      color: tab.isFavorite ? accent : muted,
+                  Semantics(
+                    toggled: tab.isFavorite,
+                    child: IconButton(
+                      tooltip: tab.isFavorite
+                          ? 'Remove favorite'
+                          : 'Add favorite',
+                      onPressed: onFavorite,
+                      icon: Icon(
+                        tab.isFavorite ? Icons.favorite : Icons.favorite_border,
+                        color: tab.isFavorite ? accent : muted,
+                      ),
                     ),
                   ),
                   Expanded(

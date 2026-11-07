@@ -86,9 +86,11 @@ class BackendSearch implements TabSearchProvider {
 class MemoryRepository implements TabRepository {
   final tabs = <SavedTab>[];
   bool duplicate = false;
+  bool failSave = false;
   @override
   Future<SavedTab> save(SavedTab tab) async {
     if (duplicate) throw const DuplicateTabException();
+    if (failSave) throw StateError('Storage unavailable');
     final saved = tab.copyWith(id: 1);
     tabs.add(saved);
     return saved;
@@ -432,6 +434,7 @@ void main() {
       find.textContaining('Some providers are unavailable: Unavailable'),
       findsOneWidget,
     );
+    expect(find.text('Retry providers'), findsOneWidget);
     expect(find.text('Save'), findsOneWidget);
   });
 
@@ -459,4 +462,39 @@ void main() {
       expect(find.text('Choose an arrangement'), findsOneWidget);
     },
   );
+  testWidgets('timeout shows retry and can recover', (tester) async {
+    await start(tester);
+    provider.pending.completeError(
+      const TabProviderException(
+        'Search timed out.',
+        kind: TabProviderErrorKind.timeout,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('timed out'), findsOneWidget);
+    provider.pending = Completer();
+    await tester.tap(find.text('Retry'));
+    await tester.pump();
+    provider.pending.complete([result]);
+    await tester.pumpAndSettle();
+    expect(find.text('Save'), findsOneWidget);
+  });
+  testWidgets('failed save shows retry and retains preview', (tester) async {
+    repository.failSave = true;
+    await start(tester);
+    provider.pending.complete([result]);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Lead · Guitar'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save to Library'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Could not save this tab'), findsOneWidget);
+    expect(find.textContaining('e|--2--|'), findsOneWidget);
+    repository.failSave = false;
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(find.text('Saved to Library'), findsOneWidget);
+  });
 }

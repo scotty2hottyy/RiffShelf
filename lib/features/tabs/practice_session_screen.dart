@@ -824,17 +824,26 @@ class _PracticeControls extends StatelessWidget {
                   onPressed: onPlayPause,
                   icon: Icon(playing ? Icons.pause : Icons.play_arrow),
                 ),
-                IconButton(
-                  key: const ValueKey('practice-loop-toggle'),
-                  tooltip: looping ? 'Loop on' : 'Loop off',
-                  onPressed: onToggleLoop,
-                  icon: Icon(Icons.repeat, color: looping ? accent : null),
+                Semantics(
+                  toggled: looping,
+                  child: IconButton(
+                    key: const ValueKey('practice-loop-toggle'),
+                    tooltip: looping ? 'Loop on' : 'Loop off',
+                    onPressed: onToggleLoop,
+                    icon: Icon(Icons.repeat, color: looping ? accent : null),
+                  ),
                 ),
-                IconButton(
-                  key: const ValueKey('practice-metronome-toggle'),
-                  tooltip: metronome ? 'Metronome on' : 'Metronome off',
-                  onPressed: onToggleMetronome,
-                  icon: Icon(Icons.av_timer, color: metronome ? accent : null),
+                Semantics(
+                  toggled: metronome,
+                  child: IconButton(
+                    key: const ValueKey('practice-metronome-toggle'),
+                    tooltip: metronome ? 'Metronome on' : 'Metronome off',
+                    onPressed: onToggleMetronome,
+                    icon: Icon(
+                      Icons.av_timer,
+                      color: metronome ? accent : null,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -864,7 +873,7 @@ class _PracticeControls extends StatelessWidget {
                                 .clamp(1.0, 2.5),
                         constraints: const BoxConstraints(
                           minWidth: 50,
-                          minHeight: 44,
+                          minHeight: 48,
                         ),
                         alignment: Alignment.center,
                         padding: const EdgeInsets.symmetric(

@@ -27,10 +27,16 @@ class ThemeProvider extends ChangeNotifier {
 
     if (isLight) {
       return ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: accentColor,
-          brightness: Brightness.light,
-        ).copyWith(primary: accentColor, secondary: const Color(0xFF8BF3E3)),
+        colorScheme:
+            ColorScheme.fromSeed(
+              seedColor: accentColor,
+              brightness: Brightness.light,
+            ).copyWith(
+              primary: const Color(0xFF006C65),
+              onPrimary: Colors.white,
+              secondary: const Color(0xFF006C65),
+              onSecondary: Colors.white,
+            ),
         scaffoldBackgroundColor: const Color(0xFFFAFAFA),
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFFFAFAFA),

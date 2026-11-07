@@ -18,7 +18,9 @@ class _PracticeScreenState extends State<PracticeScreen> {
       widget.repository ?? SqliteTabRepository.local();
   late Future<List<SavedTab>> tabs = repository.findTabs();
 
-  void refresh() => setState(() => tabs = repository.findTabs());
+  void refresh() => setState(() {
+    tabs = repository.findTabs();
+  });
 
   @override
   void initState() {
@@ -42,7 +44,21 @@ class _PracticeScreenState extends State<PracticeScreen> {
       future: tabs,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return const Center(child: Text('Could not load your library.'));
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Could not load your library. Check storage and try again.',
+                    textAlign: TextAlign.center,
+                  ),
+                  TextButton(onPressed: refresh, child: const Text('Retry')),
+                ],
+              ),
+            ),
+          );
         }
         if (!snapshot.hasData) {
           return const Center(child: Text('Loading tabs…'));

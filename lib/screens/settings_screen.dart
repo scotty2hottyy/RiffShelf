@@ -28,12 +28,15 @@ class SettingsScreen extends StatelessWidget {
             subtitle: 'Switch between light and dark themes',
             trailing: Consumer<ThemeProvider>(
               builder: (context, themeProvider, child) {
-                return Switch(
-                  value: themeProvider.isLightMode,
-                  onChanged: (value) {
-                    themeProvider.setLightMode(value);
-                  },
-                  activeThumbColor: theme.colorScheme.primary,
+                return Semantics(
+                  label: 'Light mode',
+                  child: Switch(
+                    value: themeProvider.isLightMode,
+                    onChanged: (value) {
+                      themeProvider.setLightMode(value);
+                    },
+                    activeThumbColor: theme.colorScheme.primary,
+                  ),
                 );
               },
             ),

@@ -20,6 +20,7 @@ class FakeInput implements TunerAudioInput {
   FakeInput(this.status);
   final MicrophoneStatus status;
   final controller = StreamController<Uint8List>();
+  int preparations = 0;
   int starts = 0;
   int stops = 0;
   int disposals = 0;
@@ -27,7 +28,11 @@ class FakeInput implements TunerAudioInput {
   @override
   int get sampleRate => 22050;
   @override
-  Future<MicrophoneStatus> prepare() async => status;
+  Future<MicrophoneStatus> prepare() async {
+    preparations++;
+    return status;
+  }
+
   @override
   Future<Stream<Uint8List>> start() async {
     starts++;
@@ -311,6 +316,28 @@ void main() {
       );
     });
 
+    for (final status in [
+      MicrophoneStatus.permissionDenied,
+      MicrophoneStatus.noMicrophone,
+      MicrophoneStatus.error,
+    ]) {
+      testWidgets('microphone $status explains failure and allows retry', (
+        tester,
+      ) async {
+        final input = FakeInput(status);
+        await pumpTuner(tester, input);
+        await tester.tap(find.text('Start tuning'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('tuner-status')), findsOneWidget);
+        expect(find.text('Try again'), findsOneWidget);
+        expect(input.preparations, 1);
+        await tester.ensureVisible(find.text('Try again'));
+        await tester.tap(find.text('Try again'));
+        await tester.pumpAndSettle();
+        expect(input.preparations, 2);
+      });
+    }
+
     testWidgets('shows the detected string', (tester) async {
       final input = FakeInput(MicrophoneStatus.available);
       await pumpTuner(tester, input);
@@ -472,6 +499,70 @@ void main() {
           expect(tester.takeException(), isNull);
         },
       );
+    }
+
+    testWidgets('string controls expose selected state and 48 pixel targets', (
+      tester,
+    ) async {
+      await pumpTuner(tester, FakeInput(MicrophoneStatus.available));
+      final string = find.byKey(const Key('tuner-string-5-E4'));
+      await tester.ensureVisible(string);
+      expect(tester.getSize(string).width, greaterThanOrEqualTo(48));
+      expect(tester.getSize(string).height, greaterThanOrEqualTo(48));
+      Semantics state() => tester.widget<Semantics>(
+        find
+            .ancestor(
+              of: string,
+              matching: find.byWidgetPredicate(
+                (w) => w is Semantics && w.properties.label == 'String 6, E4',
+              ),
+            )
+            .first,
+      );
+      expect(state().properties.selected, isFalse);
+      await tester.tap(string);
+      await tester.pump();
+      expect(state().properties.selected, isTrue);
+    });
+
+    for (final light in [false, true]) {
+      for (final offset in [10, 30]) {
+        testWidgets(
+          'tuner cents indicator has contrast for $offset cents in ${light ? 'light' : 'dark'} mode',
+          (tester) async {
+            final input = FakeInput(MicrophoneStatus.available);
+            await tester.pumpWidget(
+              MaterialApp(
+                theme: ThemeProvider().getTheme(light),
+                home: Scaffold(
+                  body: TunerScreen(
+                    inputFactory: () => input,
+                    settingsStore: FakeSettingsStore(),
+                  ),
+                ),
+              ),
+            );
+            await tester.ensureVisible(find.text('Start tuning'));
+            await tester.tap(find.text('Start tuning'));
+            await tester.pump();
+            final frequency = 110 * math.pow(2, offset / 1200);
+            emitPitch(input, frequency.toDouble());
+            emitPitch(input, frequency.toDouble());
+            await tester.pump();
+            final color = tester
+                .widget<Text>(find.byKey(const Key('tuner-target-note')))
+                .style!
+                .color!;
+            final background = light ? Colors.white : const Color(0xFF101B1E);
+            final first = color.computeLuminance(),
+                second = background.computeLuminance();
+            final ratio =
+                (math.max(first, second) + .05) /
+                (math.min(first, second) + .05);
+            expect(ratio, greaterThanOrEqualTo(4.5));
+          },
+        );
+      }
     }
 
     testWidgets('releases the microphone when the screen is disposed', (

@@ -84,6 +84,7 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
 
   Future<void> chooseAlbum() async {
     final target = current;
+    var saving = false;
     try {
       final candidates = await artworkService.candidates(
         target.artist,
@@ -98,7 +99,13 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
               ? [
                   const Padding(
                     padding: EdgeInsets.all(16),
-                    child: Text('No albums found.'),
+                    child: Text(
+                      'No albums found. Try another search after checking the song and artist.',
+                    ),
+                  ),
+                  SimpleDialogOption(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Close'),
                   ),
                 ]
               : [
@@ -115,15 +122,30 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
       if (selected == null) return;
       final metadata = await artworkService.select(selected);
       final updated = target.copyWith(artwork: metadata);
+      saving = true;
       await widget.repository!.save(updated);
       if (mounted) updateTrack(updated);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'Album lookup or artwork download failed. Please try again.',
+              saving
+                  ? 'Could not save the album selection. Check storage and try again.'
+                  : artworkService.baseUrl.trim().isEmpty
+                  ? 'Album lookup needs a configured backend. Your saved tab remains available offline.'
+                  : 'Album lookup or artwork download failed. Check your connection and try again.',
             ),
+            action:
+                current.id == target.id &&
+                    (saving || artworkService.baseUrl.trim().isNotEmpty)
+                ? SnackBarAction(
+                    label: 'Retry',
+                    onPressed: () {
+                      if (current.id == target.id) chooseAlbum();
+                    },
+                  )
+                : null,
           ),
         );
       }
@@ -139,7 +161,19 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not remove the album.')),
+          SnackBar(
+            content: const Text(
+              'Could not remove the album. Please try again.',
+            ),
+            action: current.id == target.id
+                ? SnackBarAction(
+                    label: 'Retry',
+                    onPressed: () {
+                      if (current.id == target.id) removeAlbum();
+                    },
+                  )
+                : null,
+          ),
         );
       }
     }
@@ -223,6 +257,7 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
                 ],
                 onChanged: (id) {
                   if (id == null || id == current.id) return;
+                  ScaffoldMessenger.of(context).hideCurrentSnackBar();
                   final next = relatedTracks.firstWhere(
                     (track) => track.id == id,
                   );

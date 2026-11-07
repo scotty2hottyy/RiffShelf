@@ -160,18 +160,18 @@ class _TunerScreenState extends State<TunerScreen> with WidgetsBindingObserver {
       WidgetsBinding.instance.addPostFrameCallback((_) => _controller.stop());
     }
 
-    return ListenableBuilder(
-      listenable: _controller,
-      builder: (context, _) => SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (widget.preset == null)
-                  _PresetPicker(
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (widget.preset == null)
+                ListenableBuilder(
+                  listenable: _controller,
+                  builder: (context, _) => _PresetPicker(
                     controller: _controller,
                     customTunings: _customTunings,
                     selectedId: _selectedId,
@@ -180,17 +180,27 @@ class _TunerScreenState extends State<TunerScreen> with WidgetsBindingObserver {
                     onEdit: _editTuning,
                     onDelete: _deleteTuning,
                     builtInId: _builtInId,
-                  )
-                else
-                  Text(widget.preset!.name),
-                const SizedBox(height: 20),
-                _MeterCard(controller: _controller),
-                const SizedBox(height: 16),
-                _StatusMessage(controller: _controller),
-                const SizedBox(height: 8),
-                _ActionButton(controller: _controller),
-              ],
-            ),
+                  ),
+                )
+              else
+                Text(widget.preset!.name),
+              const SizedBox(height: 20),
+              ListenableBuilder(
+                listenable: _controller,
+                builder: (context, _) => _MeterCard(controller: _controller),
+              ),
+              const SizedBox(height: 16),
+              ListenableBuilder(
+                listenable: _controller,
+                builder: (context, _) =>
+                    _StatusMessage(controller: _controller),
+              ),
+              const SizedBox(height: 8),
+              ListenableBuilder(
+                listenable: _controller,
+                builder: (context, _) => _ActionButton(controller: _controller),
+              ),
+            ],
           ),
         ),
       ),
@@ -451,8 +461,12 @@ class _MeterCard extends StatelessWidget {
         : reading.inTune
         ? accent
         : reading.targetCents.abs() < 20
-        ? Colors.amber
-        : Colors.deepOrangeAccent;
+        ? (theme.brightness == Brightness.dark
+              ? Colors.amber
+              : const Color(0xFF805000))
+        : (theme.brightness == Brightness.dark
+              ? Colors.deepOrangeAccent
+              : const Color(0xFFA33612));
 
     return Container(
       padding: const EdgeInsets.all(24),
@@ -574,7 +588,7 @@ class _MeterCard extends StatelessWidget {
               if (notes.length > 6 ||
                   textScale > 1.3 ||
                   (notes.length != 6 &&
-                      notes.length * 54 - 8 > constraints.maxWidth)) {
+                      notes.length * 56 - 8 > constraints.maxWidth)) {
                 return Wrap(
                   alignment: WrapAlignment.center,
                   spacing: 8,
@@ -613,7 +627,7 @@ class _MeterCard extends StatelessWidget {
                   ],
                 ],
               );
-              if (notes.length == 6 && constraints.maxWidth < 316) {
+              if (notes.length == 6 && constraints.maxWidth < 328) {
                 return Column(
                   children: [
                     row(notes.sublist(0, 3), 0, 'tuner-strings-first-row'),
@@ -647,26 +661,36 @@ class _StringBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      key: Key('tuner-string-$index-$note'),
-      onTap: onTap,
-      customBorder: const CircleBorder(),
-      child: Container(
-        width:
-            46 *
-            (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 2.0),
-        height:
-            46 *
-            (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 2.0),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: active ? color.withValues(alpha: 0.18) : null,
-          border: Border.all(
-            color: active ? color : Theme.of(context).dividerColor,
+    return Semantics(
+      button: true,
+      selected: active,
+      label: 'String ${index + 1}, $note',
+      child: InkWell(
+        key: Key('tuner-string-$index-$note'),
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width:
+              48 *
+              (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 2.0),
+          height:
+              48 *
+              (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 2.0),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: active ? color.withValues(alpha: 0.18) : null,
+            border: Border.all(
+              color: active ? color : Theme.of(context).dividerColor,
+            ),
+          ),
+          child: ExcludeSemantics(
+            child: Text(
+              note,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
           ),
         ),
-        child: Text(note, style: const TextStyle(fontWeight: FontWeight.w600)),
       ),
     );
   }
