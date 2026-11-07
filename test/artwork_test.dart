@@ -190,6 +190,88 @@ void main() {
     expect(await match([recording(), recording(releases: [])], 2), isNull);
   });
 
+  test('empty release dates remain selectable as unknown', () async {
+    for (final date in ['', '  \t ']) {
+      final result = recording();
+      result['releases'] = [
+        {'id': id1, 'title': 'First', 'date': date},
+      ];
+      final service = serviceFor(
+        (_) => http.Response(
+          jsonEncode({
+            'count': 1,
+            'recordings': [result],
+          }),
+          200,
+        ),
+      );
+      expect((await service.candidates('Artist', 'Song')).single.date, isNull);
+      expect((await service.automaticCandidate('Artist', 'Song'))!.id, id1);
+    }
+  });
+
+  test(
+    'malformed releases are skipped and prevent automatic assignment',
+    () async {
+      final malformed = <Object?>[
+        null,
+        {'id': 'invalid', 'title': 'Bad'},
+        {'id': id2, 'title': ''},
+        {'id': id2, 'title': 'Bad', 'date': 2000},
+        {'id': id2, 'title': 'Bad', 'date': 'not a date'},
+        {'id': id2, 'title': 'Bad', 'artist-credit': []},
+      ];
+      for (final badRelease in malformed) {
+        final result = recording();
+        result['releases'] = [
+          {'id': id1, 'title': 'First', 'date': '2000'},
+          badRelease,
+        ];
+        var artworkRequests = 0;
+        final service = serviceFor((request) {
+          if (request.url.host != 'musicbrainz.org') artworkRequests++;
+          return http.Response(
+            jsonEncode({
+              'count': 1,
+              'recordings': [result],
+            }),
+            200,
+          );
+        });
+        expect((await service.candidates('Artist', 'Song')).single.id, id1);
+        expect(await service.automaticCandidate('Artist', 'Song'), isNull);
+        await service.assignAutomatically(repo, tab);
+        expect((await repo.getById(tab.id!))!.artwork, isNull);
+        expect(artworkRequests, 0);
+      }
+    },
+  );
+
+  test('incomplete and ambiguous results do not assign artwork', () async {
+    for (final payload in [
+      {
+        'count': 2,
+        'recordings': [recording()],
+      },
+      {
+        'count': 1,
+        'recordings': [
+          recording(releases: [id1, id2]),
+        ],
+      },
+    ]) {
+      var artworkRequests = 0;
+      final service = serviceFor((request) {
+        if (request.url.host != 'musicbrainz.org') artworkRequests++;
+        return http.Response(jsonEncode(payload), 200);
+      });
+      expect(await service.automaticCandidate('Artist', 'Song'), isNull);
+      await service.assignAutomatically(repo, tab);
+      expect((await repo.getById(tab.id!))!.artwork, isNull);
+      expect(artworkRequests, 0);
+    }
+  });
+
   test(
     'pacer serializes simultaneous calls and respects provider backoff',
     () async {

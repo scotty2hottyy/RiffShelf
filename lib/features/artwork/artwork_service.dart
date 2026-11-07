@@ -286,21 +286,38 @@ class ArtworkService {
               release['id'] is! String ||
               !_id.hasMatch(release['id'] as String) ||
               release['title'] is! String ||
-              (release['title'] as String).trim().isEmpty ||
-              (release['date'] != null &&
-                  (release['date'] is! String ||
-                      !RegExp(r'^\d{4}(?:-\d{2})?(?:-\d{2})?$')
-                          .hasMatch(release['date'] as String)))) {
-            throw const FormatException('Invalid release');
+              (release['title'] as String).trim().isEmpty) {
+            complete = false;
+            continue;
+          }
+          final rawDate = release['date'];
+          if (rawDate != null && rawDate is! String) {
+            complete = false;
+            continue;
+          }
+          final date = rawDate is String && rawDate.trim().isEmpty
+              ? null
+              : rawDate as String?;
+          if (date != null &&
+              !RegExp(r'^\d{4}(?:-\d{2})?(?:-\d{2})?$').hasMatch(date)) {
+            complete = false;
+            continue;
+          }
+          String releaseArtist;
+          try {
+            releaseArtist = release['artist-credit'] == null
+                ? credited
+                : _artistCredit(release['artist-credit']);
+          } on FormatException {
+            complete = false;
+            continue;
           }
           final id = (release['id'] as String).toLowerCase();
           final candidate = AlbumCandidate(
             id,
             (release['title'] as String).trim(),
-            release['artist-credit'] == null
-                ? credited
-                : _artistCredit(release['artist-credit']),
-            release['date'] as String?,
+            releaseArtist,
+            date,
           );
           candidates.putIfAbsent(id, () => candidate);
           if (exact) {
