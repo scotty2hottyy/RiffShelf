@@ -32,3 +32,13 @@ abstract interface class TabRepository {
   Future<void> delete(int id);
   Future<void> close();
 }
+
+/// Optional atomic artwork update used by background matching.
+abstract interface class AutomaticArtworkRepository {
+  Future<bool> setArtworkIfUnselected({
+    required int id,
+    required String artist,
+    required String title,
+    required String artwork,
+  });
+}

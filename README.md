@@ -51,3 +51,7 @@ Practice requires valid measure signatures, finite note positions within each me
 ## Search and metadata backend
 
 The independent FastAPI service and its setup, testing, and deployment-planning instructions are in [server/README.md](server/README.md).
+
+## Album artwork
+
+Album lookup and cover downloads connect directly to MusicBrainz and Cover Art Archive; no backend configuration or API key is required. New saved tabs with unambiguous high-confidence matches are checked in the background. You can choose, change, or remove a release on the saved-tab detail screen. Covers are cached locally for offline viewing, with an abstract fallback when artwork is unavailable. See [online search and artwork](docs/online-search.md) for matching and rate-limit details.

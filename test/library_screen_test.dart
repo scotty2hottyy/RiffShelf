@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:riffshelf/core/theme_provider.dart';
 import 'package:riffshelf/features/artwork/album_art.dart';
+import 'package:riffshelf/features/artwork/artwork_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:riffshelf/core/database/tab_repository.dart';
 import 'package:riffshelf/core/models/instrument_type.dart';
@@ -13,6 +16,9 @@ import 'package:riffshelf/screens/library_screen.dart';
 import 'package:riffshelf/screens/practice_screen.dart';
 
 class FailingPicker extends FilePickerPlatform {
+  FailingPicker({this.files, this.failFirst = true});
+  final List<PlatformFile>? files;
+  final bool failFirst;
   int calls = 0;
   @override
   Future<List<PlatformFile>> pickFiles({
@@ -29,9 +35,28 @@ class FailingPicker extends FilePickerPlatform {
     WebOptions webOptions = const WebOptions(),
   }) async {
     calls++;
-    if (calls == 1) throw StateError('Picker unavailable');
-    return [];
+    if (failFirst && calls == 1) throw StateError('Picker unavailable');
+    return files ?? [];
   }
+}
+
+final class MemoryPickedFile extends PlatformFile {
+  MemoryPickedFile(this.bytes);
+  final Uint8List bytes;
+  @override
+  String get name => 'song.gpx';
+  @override
+  Uri get uri => Uri.file('/song.gpx');
+  @override
+  Never get xFile => throw UnimplementedError();
+  @override
+  int? lengthSync() => bytes.length;
+  @override
+  Future<int?> length() async => bytes.length;
+  @override
+  Future<Uint8List> readAsBytes() async => bytes;
+  @override
+  Stream<Uint8List> readAsByteStream() => Stream.value(bytes);
 }
 
 class MemoryRepository implements TabRepository {
@@ -79,6 +104,48 @@ class MemoryRepository implements TabRepository {
 
   @override
   Future<void> close() async {}
+}
+
+class AutomaticLibraryRepository extends MemoryRepository
+    implements AutomaticArtworkRepository {
+  @override
+  Future<SavedTab> save(SavedTab tab) =>
+      super.save(tab.id == null ? tab.copyWith(id: 1) : tab);
+  @override
+  Future<bool> setArtworkIfUnselected({
+    required int id,
+    required String artist,
+    required String title,
+    required String artwork,
+  }) async {
+    final index = data.indexWhere(
+      (tab) =>
+          tab.id == id &&
+          tab.artist == artist &&
+          tab.title == title &&
+          tab.artwork == null &&
+          tab.albumArt == null,
+    );
+    if (index < 0) return false;
+    data[index] = data[index].copyWith(artwork: artwork);
+    return true;
+  }
+}
+
+class ImportArtworkService extends ArtworkService {
+  final pending = Completer<AlbumCandidate?>();
+  int lookups = 0;
+  @override
+  Future<AlbumCandidate?> automaticCandidate(String artist, String title) {
+    expect(artist, 'A');
+    expect(title, 'S');
+    lookups++;
+    return pending.future;
+  }
+
+  @override
+  Future<String> select(AlbumCandidate album) async =>
+      jsonEncode({'release_id': album.id, 'local_path': '/cached/cover.img'});
 }
 
 SavedTab tab() => const SavedTab(
@@ -403,4 +470,71 @@ void main() {
     await tester.pumpAndSettle();
     expect(picker.calls, 2);
   });
+  testWidgets(
+    'importing a tab starts automatic artwork lookup without blocking the save',
+    (tester) async {
+      final bytes = (await tester.runAsync(
+        () => File('test/fixtures/synthetic.gpx').readAsBytes(),
+      ))!;
+      final old = ascii.encode(
+        '<Score><Title><![CDATA[GPX Song]]></Title></Score>',
+      );
+      final replacement = ascii.encode(
+        '<Score><Title>S</Title><Artist>A</Artist></Score> ',
+      );
+      var replaced = false;
+      for (var i = 0; i <= bytes.length - old.length; i++) {
+        var matches = true;
+        for (var j = 0; j < old.length; j++) {
+          if (bytes[i + j] != old[j]) {
+            matches = false;
+            break;
+          }
+        }
+        if (matches) {
+          bytes.setRange(i, i + old.length, replacement);
+          replaced = true;
+          break;
+        }
+      }
+      expect(replaced, isTrue);
+      final previous = FilePickerPlatform.instance;
+      FilePickerPlatform.instance = FailingPicker(
+        files: [MemoryPickedFile(bytes)],
+        failFirst: false,
+      );
+      addTearDown(() => FilePickerPlatform.instance = previous);
+      final repo = AutomaticLibraryRepository();
+      final artwork = ImportArtworkService();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LibraryScreen(repository: repo, artworkService: artwork),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Import Tab'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('Guitar (6 strings)'));
+      await tester.pumpAndSettle();
+      expect(find.text('Tab imported'), findsOneWidget);
+      expect(repo.data.single.artwork, isNull);
+      expect(artwork.lookups, 1);
+      artwork.pending.complete(
+        const AlbumCandidate(
+          'a1ed26f7-3f11-4633-a3c7-4a4abfa3271f',
+          'Album',
+          'A',
+          '2000',
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(
+        artworkMetadata(repo.data.single)!['release_id'],
+        'a1ed26f7-3f11-4633-a3c7-4a4abfa3271f',
+      );
+    },
+  );
 }

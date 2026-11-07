@@ -1,4 +1,7 @@
 import 'package:file_picker/file_picker.dart';
+
+import '../features/artwork/artwork_service.dart';
+
 import 'package:flutter/material.dart';
 
 import '../core/database/sqlite_tab_repository.dart';
@@ -29,8 +32,9 @@ Future<int?> chooseTabTrack(
 );
 
 class LibraryScreen extends StatefulWidget {
-  const LibraryScreen({super.key, this.repository});
+  const LibraryScreen({super.key, this.repository, this.artworkService});
   final TabRepository? repository;
+  final ArtworkService? artworkService;
   @override
   State<LibraryScreen> createState() => _LibraryScreenState();
 }
@@ -70,14 +74,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.repository == null) {
+    if (repository is SqliteTabRepository) {
       SqliteTabRepository.changes.addListener(refresh);
     }
   }
 
   @override
   void dispose() {
-    if (widget.repository == null) {
+    if (repository is SqliteTabRepository) {
       SqliteTabRepository.changes.removeListener(refresh);
     }
     search.dispose();
@@ -119,7 +123,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
         throw const FormatException('Unsupported file format.');
       }
       tab = tab.copyWith(importKey: importer.importKey(bytes, trackIndex));
-      await repository.save(tab);
+      final saved = await repository.save(tab);
+      ArtworkService.scheduleAutomatic(
+        repository,
+        saved,
+        service: widget.artworkService,
+      );
       if (!mounted) return;
       refresh();
       ScaffoldMessenger.of(context)
@@ -533,8 +542,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     await Navigator.push(
                       context,
                       MaterialPageRoute<void>(
-                        builder: (_) =>
-                            TabDetailScreen(tab: tab, repository: repository),
+                        builder: (_) => TabDetailScreen(
+                          tab: tab,
+                          repository: repository,
+                          artworkService: widget.artworkService,
+                        ),
                       ),
                     );
                     if (mounted) refresh();

@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:riffshelf/core/theme_provider.dart';
 import 'package:riffshelf/features/artwork/album_art.dart';
+import 'package:riffshelf/features/artwork/artwork_service.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -109,6 +110,43 @@ class MemoryRepository implements TabRepository {
   Future<void> delete(int id) async => tabs.removeWhere((t) => t.id == id);
   @override
   Future<void> close() async {}
+}
+
+class AutomaticMemoryRepository extends MemoryRepository
+    implements AutomaticArtworkRepository {
+  @override
+  Future<bool> setArtworkIfUnselected({
+    required int id,
+    required String artist,
+    required String title,
+    required String artwork,
+  }) async {
+    final index = tabs.indexWhere(
+      (tab) =>
+          tab.id == id &&
+          tab.artist == artist &&
+          tab.title == title &&
+          tab.artwork == null &&
+          tab.albumArt == null,
+    );
+    if (index < 0) return false;
+    tabs[index] = tabs[index].copyWith(artwork: artwork);
+    return true;
+  }
+}
+
+class DeferredAutomaticArtwork extends ArtworkService {
+  final pending = Completer<AlbumCandidate?>();
+  int lookups = 0;
+  @override
+  Future<AlbumCandidate?> automaticCandidate(String artist, String title) {
+    lookups++;
+    return pending.future;
+  }
+
+  @override
+  Future<String> select(AlbumCandidate album) async =>
+      jsonEncode({'release_id': album.id, 'local_path': '/cached/cover.img'});
 }
 
 void main() {
@@ -497,4 +535,51 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Saved to Library'), findsOneWidget);
   });
+  testWidgets(
+    'saving a discovered tab starts a nonblocking automatic artwork lookup',
+    (tester) async {
+      final repo = AutomaticMemoryRepository();
+      final artwork = DeferredAutomaticArtwork();
+      provider.pending = Completer();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: DiscoverScreen(
+              service: TabSearchService([provider]),
+              repository: repo,
+              artworkService: artwork,
+            ),
+          ),
+        ),
+      );
+      await tester.enterText(find.byType(TextField), 'Song');
+      await tester.tap(find.text('Search'));
+      await tester.pump();
+      provider.pending.complete([result]);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('Lead · Guitar'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save to Library'));
+      await tester.pump();
+      expect(find.text('Saved to Library'), findsOneWidget);
+      expect(repo.tabs.single.artwork, isNull);
+      expect(artwork.lookups, 1);
+      artwork.pending.complete(
+        const AlbumCandidate(
+          'a1ed26f7-3f11-4633-a3c7-4a4abfa3271f',
+          'Album',
+          'Artist',
+          '2000',
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(
+        artworkMetadata(repo.tabs.single)!['release_id'],
+        'a1ed26f7-3f11-4633-a3c7-4a4abfa3271f',
+      );
+    },
+  );
 }

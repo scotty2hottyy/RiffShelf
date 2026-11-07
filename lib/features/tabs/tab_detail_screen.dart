@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/models/saved_tab.dart';
 import '../../core/database/tab_repository.dart';
+import '../../core/database/sqlite_tab_repository.dart';
 import '../artwork/album_art.dart';
 import '../artwork/artwork_service.dart';
 import 'practice_preparation_screen.dart';
@@ -48,6 +49,29 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
   void initState() {
     super.initState();
     loadRelatedTracks();
+    if (widget.repository is SqliteTabRepository) {
+      SqliteTabRepository.changes.addListener(refreshCurrent);
+      refreshCurrent();
+    }
+  }
+
+  @override
+  void dispose() {
+    if (widget.repository is SqliteTabRepository) {
+      SqliteTabRepository.changes.removeListener(refreshCurrent);
+    }
+    super.dispose();
+  }
+
+  Future<void> refreshCurrent() async {
+    final id = current.id;
+    if (id == null || widget.repository == null) return;
+    try {
+      final fresh = await widget.repository!.getById(id);
+      if (mounted && fresh != null && current.id == id) updateTrack(fresh);
+    } catch (_) {
+      /* The displayed saved tab remains usable. */
+    }
   }
 
   Future<void> loadRelatedTracks() async {
@@ -70,7 +94,7 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
   }
 
   late final ArtworkService artworkService =
-      widget.artworkService ?? ArtworkService();
+      widget.artworkService ?? ArtworkService.shared;
 
   void updateTrack(SavedTab updated) {
     setState(() {
@@ -84,6 +108,7 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
 
   Future<void> chooseAlbum() async {
     final target = current;
+    ArtworkService.cancelAutomatic(target.id!);
     var saving = false;
     try {
       final candidates = await artworkService.candidates(
@@ -121,24 +146,27 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
       );
       if (selected == null) return;
       final metadata = await artworkService.select(selected);
-      final updated = target.copyWith(artwork: metadata);
       saving = true;
-      await widget.repository!.save(updated);
+      final updated = await ArtworkService.withTabLock(target.id!, () async {
+        final latest = await widget.repository!.getById(target.id!);
+        if (latest == null) throw StateError('Tab no longer exists');
+        final updated = latest.copyWith(artwork: metadata);
+        await widget.repository!.save(updated);
+        return updated;
+      });
       if (mounted) updateTrack(updated);
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               saving
                   ? 'Could not save the album selection. Check storage and try again.'
-                  : artworkService.baseUrl.trim().isEmpty
-                  ? 'Album lookup needs a configured backend. Your saved tab remains available offline.'
+                  : error is ArtworkLookupException
+                  ? error.message
                   : 'Album lookup or artwork download failed. Check your connection and try again.',
             ),
-            action:
-                current.id == target.id &&
-                    (saving || artworkService.baseUrl.trim().isNotEmpty)
+            action: current.id == target.id
                 ? SnackBarAction(
                     label: 'Retry',
                     onPressed: () {
@@ -154,9 +182,15 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
 
   Future<void> removeAlbum() async {
     final target = current;
+    ArtworkService.cancelAutomatic(target.id!);
     try {
-      final updated = target.copyWith(clearArtwork: true);
-      await widget.repository!.save(updated);
+      final updated = await ArtworkService.withTabLock(target.id!, () async {
+        final latest = await widget.repository!.getById(target.id!);
+        if (latest == null) throw StateError('Tab no longer exists');
+        final updated = latest.copyWith(clearArtwork: true);
+        await widget.repository!.save(updated);
+        return updated;
+      });
       if (mounted) updateTrack(updated);
     } catch (_) {
       if (mounted) {

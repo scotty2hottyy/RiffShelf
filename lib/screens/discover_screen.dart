@@ -5,6 +5,7 @@ import '../core/database/tab_repository.dart';
 import '../core/models/instrument_type.dart';
 import '../core/models/saved_tab.dart';
 import '../features/artwork/album_art.dart';
+import '../features/artwork/artwork_service.dart';
 import '../features/search/application/tab_search_service.dart';
 import '../features/search/data/backend_tab_search_client.dart';
 import '../features/search/data/songsterr_provider.dart';
@@ -12,9 +13,15 @@ import '../features/search/domain/tab_source_provider.dart';
 import '../features/tabs/tab_detail_screen.dart';
 
 class DiscoverScreen extends StatefulWidget {
-  const DiscoverScreen({super.key, this.service, this.repository});
+  const DiscoverScreen({
+    super.key,
+    this.service,
+    this.repository,
+    this.artworkService,
+  });
   final TabSearchService? service;
   final TabRepository? repository;
+  final ArtworkService? artworkService;
   @override
   State<DiscoverScreen> createState() => _DiscoverScreenState();
 }
@@ -76,10 +83,16 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   void initState() {
     super.initState();
     refreshArtwork();
+    if (repository is SqliteTabRepository) {
+      SqliteTabRepository.changes.addListener(refreshArtwork);
+    }
   }
 
   @override
   void dispose() {
+    if (repository is SqliteTabRepository) {
+      SqliteTabRepository.changes.removeListener(refreshArtwork);
+    }
     query.dispose();
     if (widget.repository == null) repository.close();
     super.dispose();
@@ -152,7 +165,11 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
       await Navigator.push(
         context,
         MaterialPageRoute<void>(
-          builder: (_) => _PreviewScreen(tab: tab, repository: repository),
+          builder: (_) => _PreviewScreen(
+            tab: tab,
+            repository: repository,
+            artworkService: widget.artworkService,
+          ),
         ),
       );
       await refreshArtwork();
@@ -508,21 +525,37 @@ class _SongCard extends StatelessWidget {
 }
 
 class _PreviewScreen extends StatefulWidget {
-  const _PreviewScreen({required this.tab, required this.repository});
+  const _PreviewScreen({
+    required this.tab,
+    required this.repository,
+    this.artworkService,
+  });
   final SavedTab tab;
   final TabRepository repository;
+  final ArtworkService? artworkService;
   @override
   State<_PreviewScreen> createState() => _PreviewScreenState();
 }
 
 class _PreviewScreenState extends State<_PreviewScreen> {
+  late SavedTab shown = widget.tab;
   bool saving = false;
   bool saved = false;
   Future<void> save() async {
     setState(() => saving = true);
     try {
-      await widget.repository.save(widget.tab);
-      if (mounted) setState(() => saved = true);
+      final savedTab = await widget.repository.save(widget.tab);
+      ArtworkService.scheduleAutomatic(
+        widget.repository,
+        savedTab,
+        service: widget.artworkService,
+      );
+      if (mounted) {
+        setState(() {
+          saved = true;
+          shown = savedTab;
+        });
+      }
     } on DuplicateTabException {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -547,7 +580,12 @@ class _PreviewScreenState extends State<_PreviewScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    body: TabDetailScreen(tab: widget.tab),
+    body: TabDetailScreen(
+      key: ValueKey('preview-${shown.id}'),
+      tab: shown,
+      repository: saved ? widget.repository : null,
+      artworkService: widget.artworkService,
+    ),
     bottomNavigationBar: SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(12),

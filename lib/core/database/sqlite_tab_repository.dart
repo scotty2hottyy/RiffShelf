@@ -9,7 +9,7 @@ import '../models/saved_tab.dart';
 import '../models/tuning.dart';
 import 'tab_repository.dart';
 
-class SqliteTabRepository implements TabRepository {
+class SqliteTabRepository implements TabRepository, AutomaticArtworkRepository {
   SqliteTabRepository(this._databaseFactory, [this._databasePath]);
 
   static final ValueNotifier<int> changes = ValueNotifier(0);
@@ -160,6 +160,15 @@ class SqliteTabRepository implements TabRepository {
     }
     final db = await _db;
     if (tab.id != null) {
+      final before = await db.query(
+        'saved_tabs',
+        columns: ['artwork'],
+        where: 'id = ?',
+        whereArgs: [tab.id],
+      );
+      final previousArtwork = before.isEmpty
+          ? null
+          : before.single['artwork'] as String?;
       final count = await db.update(
         'saved_tabs',
         tab.toDatabaseMap()..remove('id'),
@@ -167,7 +176,9 @@ class SqliteTabRepository implements TabRepository {
         whereArgs: [tab.id],
       );
       if (count == 0) throw StateError('Tab does not exist: ${tab.id}');
-      await _cleanupArtwork(db);
+      if (previousArtwork != tab.artwork) {
+        await _cleanupArtwork(db, previousArtwork);
+      }
       return tab;
     }
     try {
@@ -196,37 +207,63 @@ class SqliteTabRepository implements TabRepository {
   @override
   Future<void> delete(int id) async {
     final db = await _db;
+    final before = await db.query(
+      'saved_tabs',
+      columns: ['artwork'],
+      where: 'id = ?',
+      whereArgs: [id],
+    );
     await db.delete('saved_tabs', where: 'id = ?', whereArgs: [id]);
-    await _cleanupArtwork(db);
+    await _cleanupArtwork(
+      db,
+      before.isEmpty ? null : before.single['artwork'] as String?,
+    );
   }
 
-  Future<void> _cleanupArtwork(Database db) async {
+  @override
+  Future<bool> setArtworkIfUnselected({
+    required int id,
+    required String artist,
+    required String title,
+    required String artwork,
+  }) async {
+    final count = await (await _db).update(
+      'saved_tabs',
+      {'artwork': artwork},
+      where: 'id = ? AND artist = ? AND title = ? AND artwork IS NULL AND album_art IS NULL',
+      whereArgs: [id, artist, title],
+    );
+    if (count != 0) changes.value++;
+    return count != 0;
+  }
+
+  // Only remove the previous image; a directory sweep can race an in-flight download.
+  Future<void> _cleanupArtwork(Database db, String? previous) async {
     try {
-      final directory = Directory(
-        p.join(await _databaseFactory.getDatabasesPath(), 'artwork'),
+      final data = jsonDecode(previous ?? 'null');
+      if (data is! Map || data['local_path'] is! String) return;
+      final path = data['local_path'] as String;
+      final directory = p.join(
+        await _databaseFactory.getDatabasesPath(),
+        'artwork',
       );
-      if (!await directory.exists()) return;
+      if (p.dirname(path) != directory ||
+          !RegExp(r'^[0-9a-f-]{36}\.img$').hasMatch(p.basename(path))) {
+        return;
+      }
       final rows = await db.query('saved_tabs', columns: ['artwork']);
-      final referenced = <String>{};
       for (final row in rows) {
         try {
-          final data = jsonDecode(row['artwork'] as String? ?? 'null');
-          if (data is Map && data['local_path'] is String) {
-            referenced.add(data['local_path'] as String);
-          }
+          final value = jsonDecode(row['artwork'] as String? ?? 'null');
+          if (value is Map && value['local_path'] == path) return;
         } catch (_) {
-          /* Ignore malformed legacy metadata. */
-        }
+          return;
+        } // Preserve files when another reference cannot be decoded.
       }
-      await for (final entity in directory.list()) {
-        if (entity is File &&
-            RegExp(r'^[0-9a-f-]{36}\.img$').hasMatch(p.basename(entity.path)) &&
-            !referenced.contains(entity.path)) {
-          await entity.delete();
-        }
-      }
+      final file = File(path);
+      if (await file.exists()) await file.delete();
     } catch (_) {
-      /* Cache cleanup must never affect saved tabs. */
+      /* Cleanup must never affect saved tabs. */
     }
   }
 
