@@ -139,9 +139,13 @@ class DeferredAutomaticArtwork extends ArtworkService {
   final pending = Completer<AlbumCandidate?>();
   int lookups = 0;
   @override
-  Future<AlbumCandidate?> automaticCandidate(String artist, String title) {
+  Future<List<AlbumCandidate>> automaticCandidates(
+    String artist,
+    String title,
+  ) async {
     lookups++;
-    return pending.future;
+    final candidate = await pending.future;
+    return candidate == null ? [] : [candidate];
   }
 
   @override

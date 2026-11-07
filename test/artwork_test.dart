@@ -82,6 +82,28 @@ class MemoryRepo implements TabRepository {
   Future<void> close() async {}
 }
 
+class AutoMemoryRepo extends MemoryRepo implements AutomaticArtworkRepository {
+  AutoMemoryRepo(super.tab);
+
+  @override
+  Future<bool> setArtworkIfUnselected({
+    required int id,
+    required String artist,
+    required String title,
+    required String artwork,
+  }) async {
+    if (tab.id != id ||
+        tab.artist != artist ||
+        tab.title != title ||
+        tab.artwork != null ||
+        tab.albumArt != null) {
+      return false;
+    }
+    tab = tab.copyWith(artwork: artwork);
+    return true;
+  }
+}
+
 class FakeArtworkService extends ArtworkService {
   @override
   Future<List<AlbumCandidate>> candidates(String artist, String title) async =>
@@ -168,7 +190,7 @@ void main() {
     expect(requests.single.headers['User-Agent'], ArtworkService.userAgent);
   });
 
-  test('automatic match requires high confidence, exact metadata, complete results and one release', () async {
+  test('automatic matching ranks multiple and incomplete results', () async {
     Future<AlbumCandidate?> match(List<Object> recordings, int count) =>
         serviceFor(
           (_) => http.Response(
@@ -176,18 +198,15 @@ void main() {
             200,
           ),
         ).automaticCandidate('Artist', 'Song');
-    expect((await match([recording()], 1))!.id, id1);
     expect(
-      await match([
+      (await match([
         recording(releases: [id1, id2]),
-      ], 1),
-      isNull,
+      ], 1))!.id,
+      id1,
     );
-    expect(await match([recording(score: 94)], 1), isNull);
-    expect(await match([recording(title: 'Song (Live)')], 1), isNull);
+    expect((await match([recording()], 101))!.id, id1);
     expect(await match([recording(artist: 'Another')], 1), isNull);
-    expect(await match([recording()], 101), isNull);
-    expect(await match([recording(), recording(releases: [])], 2), isNull);
+    expect(await match([recording(title: 'Different', score: 50)], 1), isNull);
   });
 
   test('empty release dates remain selectable as unknown', () async {
@@ -211,7 +230,160 @@ void main() {
   });
 
   test(
-    'malformed releases are skipped and prevent automatic assignment',
+    'Iron Man ranks the original studio album before reissues and collections',
+    () async {
+      final ironMan = recording(title: 'Iron Man', artist: 'Black Sabbath');
+      ironMan['releases'] = [
+        {
+          'id': '00000000-0000-0000-0000-000000000003',
+          'title': 'Greatest Hits',
+          'date': '1977',
+          'release-group': {
+            'id': 'compilation',
+            'primary-type': 'Album',
+            'secondary-types': ['Compilation'],
+          },
+        },
+        {
+          'id': id2,
+          'title': 'Paranoid',
+          'date': '2016',
+          'release-group': {
+            'id': 'paranoid',
+            'primary-type': 'Album',
+            'first-release-date': '1970-09-18',
+          },
+        },
+        {
+          'id': '00000000-0000-0000-0000-000000000004',
+          'title': 'Live Evil',
+          'date': '1982',
+          'release-group': {
+            'id': 'live',
+            'primary-type': 'Album',
+            'secondary-types': ['Live'],
+          },
+        },
+        {
+          'id': id1,
+          'title': 'Paranoid',
+          'date': '1970-09-18',
+          'release-group': {
+            'id': 'paranoid',
+            'primary-type': 'Album',
+            'first-release-date': '1970-09-18',
+          },
+        },
+      ];
+      final service = serviceFor(
+        (_) => http.Response(
+          jsonEncode({
+            'count': 152,
+            'recordings': [ironMan],
+          }),
+          200,
+        ),
+      );
+      final albums = await service.candidates('Black Sabbath', 'Iron Man');
+      expect(albums.map((album) => album.id).toList(), [
+        id1,
+        id2,
+        '00000000-0000-0000-0000-000000000003',
+        '00000000-0000-0000-0000-000000000004',
+      ]);
+      expect(
+        (await service.automaticCandidate('Black Sabbath', 'Iron Man'))!.id,
+        id1,
+      );
+    },
+  );
+
+  test(
+    'automatic artwork falls back when the preferred release has no cover',
+    () async {
+      final requests = <Uri>[];
+      final service = serviceFor((request) {
+        requests.add(request.url);
+        if (request.url.host == 'musicbrainz.org') {
+          return http.Response(
+            jsonEncode({
+              'count': 1,
+              'recordings': [
+                recording(releases: [id1, id2]),
+              ],
+            }),
+            200,
+          );
+        }
+        if (request.url.host == 'coverartarchive.org') {
+          return request.url.path.endsWith(id1)
+              ? http.Response('', 404)
+              : http.Response(jsonEncode(cover()), 200);
+        }
+        return http.Response.bytes(
+          base64Decode(png),
+          200,
+          headers: {'content-type': 'image/png'},
+        );
+      });
+      await Future.wait([
+        service.assignAutomatically(repo, tab),
+        service.assignAutomatically(repo, tab),
+      ]);
+      final saved = (await repo.getById(tab.id!))!;
+      expect(artworkMetadata(saved)!['release_id'], id2);
+      expect(
+        await File(artworkMetadata(saved)!['local_path'] as String).exists(),
+        isTrue,
+      );
+      expect(
+        requests.where((uri) => uri.host == 'musicbrainz.org'),
+        hasLength(1),
+      );
+      expect(requests.where((uri) => uri.path.endsWith(id1)), hasLength(1));
+      expect(requests.where((uri) => uri.path.endsWith(id2)), hasLength(1));
+    },
+  );
+
+  test('fallback limits editions per group and total cover requests', () async {
+    final song = recording();
+    song['releases'] = [
+      for (var i = 0; i < 12; i++)
+        {
+          'id': '00000000-0000-0000-0000-${i.toString().padLeft(12, '0')}',
+          'title': 'Album $i',
+          'date': '2000',
+          'release-group': {
+            'id': i < 4 ? 'same-group' : 'group-$i',
+            'primary-type': 'Album',
+          },
+        },
+    ];
+    final covers = <String>[];
+    final service = serviceFor((request) {
+      if (request.url.host == 'musicbrainz.org') {
+        return http.Response(
+          jsonEncode({
+            'count': 1,
+            'recordings': [song],
+          }),
+          200,
+        );
+      }
+      covers.add(request.url.path);
+      return http.Response('', 404);
+    });
+    await service.assignAutomatically(repo, tab);
+    expect(covers, hasLength(8));
+    expect(covers.any((path) => path.endsWith('000000000002')), isFalse);
+    expect(covers.any((path) => path.endsWith('000000000003')), isFalse);
+    expect((await repo.getById(tab.id!))!.artwork, isNull);
+    await service.assignAutomatically(repo, tab);
+    expect(covers, hasLength(8));
+  });
+
+  test(
+    'malformed releases are skipped while valid releases remain selectable',
     () async {
       final malformed = <Object?>[
         null,
@@ -239,38 +411,11 @@ void main() {
           );
         });
         expect((await service.candidates('Artist', 'Song')).single.id, id1);
-        expect(await service.automaticCandidate('Artist', 'Song'), isNull);
-        await service.assignAutomatically(repo, tab);
-        expect((await repo.getById(tab.id!))!.artwork, isNull);
+        expect((await service.automaticCandidate('Artist', 'Song'))!.id, id1);
         expect(artworkRequests, 0);
       }
     },
   );
-
-  test('incomplete and ambiguous results do not assign artwork', () async {
-    for (final payload in [
-      {
-        'count': 2,
-        'recordings': [recording()],
-      },
-      {
-        'count': 1,
-        'recordings': [
-          recording(releases: [id1, id2]),
-        ],
-      },
-    ]) {
-      var artworkRequests = 0;
-      final service = serviceFor((request) {
-        if (request.url.host != 'musicbrainz.org') artworkRequests++;
-        return http.Response(jsonEncode(payload), 200);
-      });
-      expect(await service.automaticCandidate('Artist', 'Song'), isNull);
-      await service.assignAutomatically(repo, tab);
-      expect((await repo.getById(tab.id!))!.artwork, isNull);
-      expect(artworkRequests, 0);
-    }
-  });
 
   test(
     'pacer serializes simultaneous calls and respects provider backoff',
@@ -376,7 +521,7 @@ void main() {
     expect(requests, hasLength(3));
   });
 
-  test('ambiguous, invalid, missing art, and provider failures leave saved tabs untouched', () async {
+  test('invalid metadata, missing art, and provider failures leave saved tabs untouched', () async {
     var count = 0;
     var payload = {
       'count': 1,
@@ -392,7 +537,7 @@ void main() {
       return http.Response('', 404);
     });
     await service.assignAutomatically(repo, tab);
-    expect(count, 1);
+    expect(count, 3);
     expect((await repo.getById(tab.id!))!.artwork, isNull);
     await service.assignAutomatically(
       repo,
@@ -407,7 +552,7 @@ void main() {
         trackName: null,
       ),
     );
-    expect(count, 1);
+    expect(count, 3);
     payload = {
       'count': 1,
       'recordings': [recording()],
@@ -614,7 +759,7 @@ void main() {
       expect(artworkMetadata(memory.tab)!['release_id'], id1);
       await tester.tap(find.text('Remove album'));
       await tester.pumpAndSettle();
-      expect(memory.tab.artwork, isNull);
+      expect(memory.tab.artwork, ArtworkService.removedArtwork);
     },
   );
 
@@ -912,6 +1057,70 @@ void main() {
       tester.widget<AlbumArt>(find.byType(AlbumArt)).tab.artwork,
       isNotNull,
     );
+  });
+
+  testWidgets('opening an existing song assigns artwork and respects removal', (
+    tester,
+  ) async {
+    final memory = AutoMemoryRepo(tab);
+    var requests = 0;
+    final service = serviceFor((request) {
+      requests++;
+      if (request.url.host == 'musicbrainz.org') {
+        return http.Response(
+          jsonEncode({
+            'count': 1,
+            'recordings': [recording()],
+          }),
+          200,
+        );
+      }
+      if (request.url.host == 'coverartarchive.org') {
+        return http.Response(jsonEncode(cover()), 200);
+      }
+      return http.Response.bytes(
+        base64Decode(png),
+        200,
+        headers: {'content-type': 'image/png'},
+      );
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TabDetailScreen(
+          tab: tab,
+          repository: memory,
+          artworkService: service,
+        ),
+      ),
+    );
+    await tester.runAsync(() async {
+      for (var i = 0; i < 50; i++) {
+        if (memory.tab.artwork != null) return;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        await tester.pump();
+      }
+    });
+    await tester.pumpAndSettle();
+    expect(memory.tab.artwork, isNotNull);
+    expect(find.text('Change album'), findsOneWidget);
+    await tester.tap(find.text('Remove album'));
+    await tester.pumpAndSettle();
+    final removed = memory.tab;
+    expect(removed.artwork, ArtworkService.removedArtwork);
+    final before = requests;
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TabDetailScreen(
+          tab: removed,
+          repository: memory,
+          artworkService: service,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(memory.tab.artwork, ArtworkService.removedArtwork);
+    expect(requests, before);
   });
   for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
     testWidgets('cached artwork renders offline on $platform', (tester) async {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/models/saved_tab.dart';
@@ -53,6 +55,24 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
       SqliteTabRepository.changes.addListener(refreshCurrent);
       refreshCurrent();
     }
+    scheduleArtwork(current);
+  }
+
+  void scheduleArtwork(SavedTab tab) {
+    final repository = widget.repository;
+    if (repository == null || tab.id == null) return;
+    unawaited(() async {
+      await artworkService.assignAutomatically(repository, tab);
+      if (!mounted || current.id != tab.id) return;
+      try {
+        final fresh = await repository.getById(tab.id!);
+        if (mounted && current.id == tab.id && fresh != null) {
+          updateTrack(fresh);
+        }
+      } catch (_) {
+        // Artwork refresh is optional.
+      }
+    }());
   }
 
   @override
@@ -187,7 +207,7 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
       final updated = await ArtworkService.withTabLock(target.id!, () async {
         final latest = await widget.repository!.getById(target.id!);
         if (latest == null) throw StateError('Tab no longer exists');
-        final updated = latest.copyWith(clearArtwork: true);
+        final updated = latest.copyWith(artwork: ArtworkService.removedArtwork);
         await widget.repository!.save(updated);
         return updated;
       });
@@ -249,10 +269,14 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
                   TextButton(
                     onPressed: chooseAlbum,
                     child: Text(
-                      tab.artwork == null ? 'Choose album' : 'Change album',
+                      tab.artwork == null ||
+                              tab.artwork == ArtworkService.removedArtwork
+                          ? 'Choose album'
+                          : 'Change album',
                     ),
                   ),
-                  if (tab.artwork != null)
+                  if (tab.artwork != null &&
+                      tab.artwork != ArtworkService.removedArtwork)
                     TextButton(
                       onPressed: removeAlbum,
                       child: const Text('Remove album'),
@@ -304,6 +328,7 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
                     current = next;
                     structured = next.hasStructuredContent;
                   });
+                  scheduleArtwork(next);
                 },
               ),
             ],

@@ -55,10 +55,27 @@ class ArtworkLookupException implements Exception {
   String toString() => message;
 }
 
+class _RankedAlbum {
+  const _RankedAlbum(
+    this.album,
+    this.score,
+    this.groupDate,
+    this.groupId,
+    this.automatic,
+  );
+  final AlbumCandidate album;
+  final int score;
+  final String? groupDate;
+  final String? groupId;
+  final bool automatic;
+}
+
 class _RecordingLookup {
-  const _RecordingLookup(this.candidates, this.automatic);
-  final List<AlbumCandidate> candidates;
-  final AlbumCandidate? automatic;
+  const _RecordingLookup(this.ranked);
+  final List<_RankedAlbum> ranked;
+  List<AlbumCandidate> get candidates => [
+    for (final item in ranked) item.album,
+  ];
 }
 
 class ArtworkService {
@@ -82,6 +99,9 @@ class ArtworkService {
   static final _versions = <int, int>{};
   static final _locks = <int, Future<void>>{};
   static final _downloads = <String, Future<String>>{};
+  static final _automaticJobs = <(TabRepository, int, int), Future<void>>{};
+  static const removedArtwork = '{"removed":true}';
+  static const _automaticLimit = 8;
   final http.Client client;
   final bool _ownsClient;
   final Directory? cacheDirectory;
@@ -89,6 +109,7 @@ class ArtworkService {
   final Duration timeout;
   final _lookupCache = <String, (Duration, _RecordingLookup)>{};
   final _pendingLookups = <String, Future<_RecordingLookup>>{};
+  final _missingCovers = <String, Duration>{};
 
   void dispose() {
     if (_ownsClient) client.close();
@@ -256,51 +277,37 @@ class ArtworkService {
         throw const FormatException('Invalid MusicBrainz response');
       }
       final recordings = payload['recordings'] as List;
-      final count = payload['count'];
-      var complete =
-          count is int &&
-          count == recordings.length &&
-          (payload['offset'] == null || payload['offset'] == 0);
-      var confident = false;
-      final candidates = <String, AlbumCandidate>{};
-      final exactReleases = <String, AlbumCandidate>{};
+      final candidates = <String, _RankedAlbum>{};
       for (final raw in recordings) {
-        if (raw is! Map ||
-            raw['title'] is! String ||
-            raw['artist-credit'] is! List) {
-          throw const FormatException('Invalid recording');
+        if (raw is! Map || raw['title'] is! String) continue;
+        String credited;
+        try {
+          credited = _artistCredit(raw['artist-credit']);
+        } on FormatException {
+          continue;
         }
-        final credited = _artistCredit(raw['artist-credit']);
-        final exact =
-            _normalize(raw['title'] as String) == _normalize(title) &&
-            _normalize(credited) == _normalize(artist);
-        final score = int.tryParse('${raw['score'] ?? ''}');
-        if (exact && score != null && score >= 95 && score <= 100) {
-          confident = true;
-        }
-        final releases = raw['releases'] ?? const [];
-        if (releases is! List) throw const FormatException('Invalid releases');
-        if (exact && releases.isEmpty) complete = false;
+        final artistExact = _normalize(credited) == _normalize(artist);
+        final titleExact =
+            _normalize(raw['title'] as String) == _normalize(title);
+        final matchScore = int.tryParse('${raw['score'] ?? ''}') ?? 0;
+        final eligible = artistExact && (titleExact || matchScore >= 95);
+        final releases = raw['releases'];
+        if (releases is! List) continue;
         for (final release in releases) {
           if (release is! Map ||
               release['id'] is! String ||
               !_id.hasMatch(release['id'] as String) ||
               release['title'] is! String ||
               (release['title'] as String).trim().isEmpty) {
-            complete = false;
             continue;
           }
           final rawDate = release['date'];
-          if (rawDate != null && rawDate is! String) {
-            complete = false;
-            continue;
-          }
+          if (rawDate != null && rawDate is! String) continue;
           final date = rawDate is String && rawDate.trim().isEmpty
               ? null
               : rawDate as String?;
           if (date != null &&
               !RegExp(r'^\d{4}(?:-\d{2})?(?:-\d{2})?$').hasMatch(date)) {
-            complete = false;
             continue;
           }
           String releaseArtist;
@@ -309,28 +316,79 @@ class ArtworkService {
                 ? credited
                 : _artistCredit(release['artist-credit']);
           } on FormatException {
-            complete = false;
             continue;
           }
+          final group = release['release-group'];
+          final groupMap = group is Map ? group : const {};
+          final primary = '${groupMap['primary-type'] ?? ''}'.toLowerCase();
+          final secondary = groupMap['secondary-types'] is List
+              ? (groupMap['secondary-types'] as List)
+                    .whereType<String>()
+                    .map((value) => value.toLowerCase())
+                    .toSet()
+              : <String>{};
+          final descriptor =
+              '${release['title']} ${raw['disambiguation'] ?? ''}'
+                  .toLowerCase();
+          final isLive =
+              secondary.contains('live') ||
+              RegExp(r'\blive\b').hasMatch(descriptor);
+          final isCompilation =
+              secondary.contains('compilation') ||
+              RegExp(r'\b(greatest hits|best of|anthology|collection)\b')
+                  .hasMatch(descriptor);
+          var rank = (artistExact ? 10000 : 0) + (titleExact ? 5000 : 0);
+          rank += primary == 'album'
+              ? 1000
+              : primary == 'single'
+              ? 400
+              : 0;
+          if (isCompilation) rank -= 700;
+          if (isLive) rank -= 800;
+          if (secondary.contains('remix')) rank -= 300;
+          if ('${release['status'] ?? ''}'.toLowerCase() == 'bootleg') {
+            rank -= 200;
+          }
+          final firstDate = groupMap['first-release-date'];
+          final groupDate =
+              firstDate is String &&
+                  RegExp(r'^\d{4}(?:-\d{2})?(?:-\d{2})?$').hasMatch(firstDate)
+              ? firstDate
+              : date;
           final id = (release['id'] as String).toLowerCase();
-          final candidate = AlbumCandidate(
-            id,
-            (release['title'] as String).trim(),
-            releaseArtist,
-            date,
+          final candidate = _RankedAlbum(
+            AlbumCandidate(
+              id,
+              (release['title'] as String).trim(),
+              releaseArtist,
+              date,
+            ),
+            rank,
+            groupDate,
+            groupMap['id'] is String ? groupMap['id'] as String : null,
+            eligible,
           );
-          candidates.putIfAbsent(id, () => candidate);
-          if (exact) {
-            exactReleases.putIfAbsent(id, () => candidate);
-            candidates[id] = exactReleases[id]!;
+          final previous = candidates[id];
+          if (previous == null || _compareAlbums(candidate, previous) < 0) {
+            candidates[id] = candidate;
           }
         }
       }
-      final auto = complete && confident && exactReleases.length == 1
-          ? exactReleases.values.single
-          : null;
-      return _RecordingLookup(candidates.values.toList(growable: false), auto);
+      final ranked = candidates.values.toList()..sort(_compareAlbums);
+      return _RecordingLookup(ranked);
     });
+  }
+
+  static int _compareAlbums(_RankedAlbum a, _RankedAlbum b) {
+    final byScore = b.score.compareTo(a.score);
+    if (byScore != 0) return byScore;
+    final byGroupDate = (a.groupDate ?? '9999').compareTo(
+      b.groupDate ?? '9999',
+    );
+    if (byGroupDate != 0) return byGroupDate;
+    final byDate = (a.album.date ?? '9999').compareTo(b.album.date ?? '9999');
+    if (byDate != 0) return byDate;
+    return a.album.id.compareTo(b.album.id);
   }
 
   Future<List<AlbumCandidate>> candidates(String artist, String title) async =>
@@ -338,7 +396,27 @@ class ArtworkService {
   Future<AlbumCandidate?> automaticCandidate(
     String artist,
     String title,
-  ) async => (await _lookup(artist, title)).automatic;
+  ) async => (await automaticCandidates(artist, title)).firstOrNull;
+
+  Future<List<AlbumCandidate>> automaticCandidates(
+    String artist,
+    String title,
+  ) async {
+    final ranked = (await _lookup(artist, title)).ranked;
+    final groupAttempts = <String, int>{};
+    final result = <AlbumCandidate>[];
+    for (final item in ranked) {
+      if (!item.automatic) continue;
+      final group = item.groupId;
+      if (group != null && (groupAttempts[group] ?? 0) >= 2) continue;
+      if (result.length >= _automaticLimit) break;
+      if (group != null) {
+        groupAttempts[group] = (groupAttempts[group] ?? 0) + 1;
+      }
+      result.add(item.album);
+    }
+    return result;
+  }
 
   /// Automatic work never delays saving, never replaces a selection, and never throws.
   Future<void> assignAutomatically(
@@ -355,23 +433,65 @@ class ArtworkService {
     }
     final id = tab.id!;
     final version = _versions[id] ?? 0;
+    final key = (repository, id, version);
+    final existing = _automaticJobs[key];
+    if (existing != null) return existing;
+    final job = _assignRanked(repository, tab, version);
+    _automaticJobs[key] = job;
     try {
-      final album = await automaticCandidate(tab.artist, tab.title);
-      if (album == null || (_versions[id] ?? 0) != version) return;
-      final metadata = await select(album);
-      final parsed = jsonDecode(metadata);
-      if (parsed is! Map || parsed['local_path'] is! String) return;
-      await withTabLock(id, () async {
+      await job;
+    } finally {
+      if (identical(_automaticJobs[key], job)) _automaticJobs.remove(key);
+    }
+  }
+
+  Future<void> _assignRanked(
+    TabRepository repository,
+    SavedTab tab,
+    int version,
+  ) async {
+    final id = tab.id!;
+    try {
+      final albums = await automaticCandidates(tab.artist, tab.title);
+      for (final album in albums) {
         if ((_versions[id] ?? 0) != version) return;
-        await (repository as AutomaticArtworkRepository).setArtworkIfUnselected(
-          id: id,
-          artist: tab.artist,
-          title: tab.title,
-          artwork: metadata,
-        );
-      });
+        if ((_missingCovers[album.id] ?? Duration.zero) > _cacheClock.elapsed) {
+          continue;
+        }
+        String metadata;
+        try {
+          metadata = await select(album);
+        } on FormatException {
+          // A malformed cover should not prevent trying another release.
+          continue;
+        } on ArtworkLookupException catch (error) {
+          if (error.message == 'Cover artwork is unavailable.') continue;
+          rethrow;
+        }
+        final parsed = jsonDecode(metadata);
+        if (parsed is! Map || parsed['local_path'] is! String) {
+          if (_missingCovers.length >= 100) {
+            _missingCovers.remove(_missingCovers.keys.first);
+          }
+          _missingCovers[album.id] =
+              _cacheClock.elapsed + const Duration(minutes: 5);
+          continue;
+        }
+        _missingCovers.remove(album.id);
+        await withTabLock(id, () async {
+          if ((_versions[id] ?? 0) != version) return;
+          await (repository as AutomaticArtworkRepository)
+              .setArtworkIfUnselected(
+                id: id,
+                artist: tab.artist,
+                title: tab.title,
+                artwork: metadata,
+              );
+        });
+        return;
+      }
     } catch (_) {
-      // Lookup, connectivity, and cache failures never block saved tabs.
+      // Connectivity, rate limits, and cache failures never block saved tabs.
     }
   }
 
