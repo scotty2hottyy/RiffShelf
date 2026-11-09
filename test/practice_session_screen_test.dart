@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:riffshelf/core/models/instrument_type.dart';
+import 'package:riffshelf/core/theme_provider.dart';
 import 'package:riffshelf/core/models/saved_tab.dart';
 import 'package:riffshelf/core/models/tab_structure.dart';
 import 'package:riffshelf/features/tabs/practice_session_screen.dart';
@@ -487,4 +488,98 @@ void main() {
       expect(find.text('Whole song'), findsOneWidget);
     },
   );
+  testWidgets('hit line remains fixed while progress and notes advance', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: PracticeSessionScreen(tab: buildTab())),
+    );
+    final line = find.byKey(const ValueKey('practice-hit-line'));
+    final track = find.byKey(const ValueKey('practice-track'));
+    final start = tester.getTopLeft(line).dx;
+    final relative = start - tester.getTopLeft(track).dx;
+    expect(relative, closeTo(36, .01));
+    expect(
+      tester
+          .widget<LinearProgressIndicator>(
+            find.byKey(const ValueKey('practice-progress')),
+          )
+          .value,
+      0,
+    );
+    await tester.tap(find.byKey(const ValueKey('practice-play-pause')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 800));
+    expect(tester.getTopLeft(line).dx, closeTo(start, .01));
+    expect(
+      tester
+          .widget<LinearProgressIndicator>(
+            find.byKey(const ValueKey('practice-progress')),
+          )
+          .value!,
+      greaterThan(0),
+    );
+    await tester.tap(find.byKey(const ValueKey('practice-play-pause')));
+    await tester.pump();
+  });
+
+  for (final light in [true, false]) {
+    testWidgets(
+      'practice fits small screens and large text in ${light ? 'light' : 'dark'} theme',
+      (tester) async {
+        tester.view.physicalSize = const Size(320, 640);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ThemeProvider().getTheme(light),
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(context)
+                  .copyWith(textScaler: const TextScaler.linear(1.8)),
+              child: child!,
+            ),
+            home: PracticeSessionScreen(tab: buildTab()),
+          ),
+        );
+        await tester.pump();
+        await tester.ensureVisible(
+          find.byKey(const ValueKey('practice-play-pause')),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('practice-hit-line')), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('practice-speed-150')),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+  testWidgets('practice toggles expose their on-off state to accessibility', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: PracticeSessionScreen(tab: buildTab())),
+    );
+    final loop = find.byKey(const ValueKey('practice-loop-toggle'));
+    Semantics state() => tester.widget<Semantics>(
+      find
+          .ancestor(
+            of: loop,
+            matching: find.byWidgetPredicate(
+              (w) => w is Semantics && w.properties.toggled != null,
+            ),
+          )
+          .first,
+    );
+    expect(state().properties.toggled, isFalse);
+    await tester.tap(loop);
+    await tester.pump();
+    expect(state().properties.toggled, isTrue);
+    expect(
+      tester.getSize(find.byKey(const ValueKey('practice-speed-100'))).height,
+      greaterThanOrEqualTo(48),
+    );
+  });
 }

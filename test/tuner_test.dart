@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:riffshelf/core/theme_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:riffshelf/core/models/tuning.dart';
 import 'package:riffshelf/core/models/instrument_type.dart';
@@ -19,6 +20,7 @@ class FakeInput implements TunerAudioInput {
   FakeInput(this.status);
   final MicrophoneStatus status;
   final controller = StreamController<Uint8List>();
+  int preparations = 0;
   int starts = 0;
   int stops = 0;
   int disposals = 0;
@@ -26,7 +28,11 @@ class FakeInput implements TunerAudioInput {
   @override
   int get sampleRate => 22050;
   @override
-  Future<MicrophoneStatus> prepare() async => status;
+  Future<MicrophoneStatus> prepare() async {
+    preparations++;
+    return status;
+  }
+
   @override
   Future<Stream<Uint8List>> start() async {
     starts++;
@@ -74,9 +80,12 @@ void emitPitch(FakeInput input, double hz) {
 
 void main() {
   test('semicircular dial maps the visible cents range and in-tune arc', () {
-    expect(CentsDialPainter.angleForCents(-50), closeTo(-math.pi / 2, 1e-9));
+    expect(CentsDialPainter.markerValues, [-20, -10, 0, 10, 20]);
+    expect(CentsDialPainter.angleForCents(-20), closeTo(-math.pi / 2, 1e-9));
+    expect(CentsDialPainter.angleForCents(-10), closeTo(-math.pi / 4, 1e-9));
+    expect(CentsDialPainter.angleForCents(10), closeTo(math.pi / 4, 1e-9));
     expect(CentsDialPainter.angleForCents(0), 0);
-    expect(CentsDialPainter.angleForCents(50), closeTo(math.pi / 2, 1e-9));
+    expect(CentsDialPainter.angleForCents(20), closeTo(math.pi / 2, 1e-9));
     expect(CentsDialPainter.angleForCents(-100), closeTo(-math.pi / 2, 1e-9));
     expect(CentsDialPainter.angleForCents(100), closeTo(math.pi / 2, 1e-9));
     expect(
@@ -307,6 +316,28 @@ void main() {
       );
     });
 
+    for (final status in [
+      MicrophoneStatus.permissionDenied,
+      MicrophoneStatus.noMicrophone,
+      MicrophoneStatus.error,
+    ]) {
+      testWidgets('microphone $status explains failure and allows retry', (
+        tester,
+      ) async {
+        final input = FakeInput(status);
+        await pumpTuner(tester, input);
+        await tester.tap(find.text('Start tuning'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('tuner-status')), findsOneWidget);
+        expect(find.text('Try again'), findsOneWidget);
+        expect(input.preparations, 1);
+        await tester.ensureVisible(find.text('Try again'));
+        await tester.tap(find.text('Try again'));
+        await tester.pumpAndSettle();
+        expect(input.preparations, 2);
+      });
+    }
+
     testWidgets('shows the detected string', (tester) async {
       final input = FakeInput(MicrophoneStatus.available);
       await pumpTuner(tester, input);
@@ -387,6 +418,153 @@ void main() {
       );
     });
 
+    testWidgets(
+      'illustration highlights manual and automatic strings and preserves out-of-range cents',
+      (tester) async {
+        final input = FakeInput(MicrophoneStatus.available);
+        await pumpTuner(tester, input);
+        InstrumentStringPainter illustration() =>
+            tester
+                    .widget<CustomPaint>(
+                      find.byKey(const Key('tuner-instrument-illustration')),
+                    )
+                    .painter!
+                as InstrumentStringPainter;
+        expect(illustration().stringCount, 6);
+        expect(illustration().activeStrings, isEmpty);
+        await tester.ensureVisible(find.byKey(const Key('tuner-string-5-E4')));
+        await tester.tap(find.byKey(const Key('tuner-string-5-E4')));
+        await tester.pump();
+        expect(illustration().activeStrings, {5});
+        await tester.ensureVisible(find.byKey(const Key('tuner-automatic')));
+        await tester.tap(find.byKey(const Key('tuner-automatic')));
+        await tester.ensureVisible(find.text('Start tuning'));
+        await tester.tap(find.text('Start tuning'));
+        await tester.pump();
+        final pitch = 110 * math.pow(2, 30 / 1200);
+        emitPitch(input, pitch.toDouble());
+        emitPitch(input, pitch.toDouble());
+        await tester.pump();
+        expect(illustration().activeStrings, {1});
+        final dial =
+            tester
+                    .widget<CustomPaint>(
+                      find.byKey(const Key('tuner-cents-dial')),
+                    )
+                    .painter!
+                as CentsDialPainter;
+        expect(dial.cents, closeTo(30, 2));
+        expect(
+          CentsDialPainter.angleForCents(dial.cents!),
+          closeTo(math.pi / 2, 1e-9),
+        );
+        expect(find.textContaining('cents'), findsOneWidget);
+        expect(
+          tester.widget<Text>(find.byKey(const Key('tuner-readout'))).data,
+          contains('+30 cents'),
+        );
+      },
+    );
+
+    for (final light in [true, false]) {
+      testWidgets(
+        'tuner adapts to large text on a small screen in ${light ? 'light' : 'dark'} theme',
+        (tester) async {
+          tester.view.physicalSize = const Size(320, 640);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: ThemeProvider().getTheme(light),
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(context)
+                    .copyWith(textScaler: const TextScaler.linear(1.8)),
+                child: child!,
+              ),
+              home: Scaffold(
+                body: TunerScreen(
+                  inputFactory: () => FakeInput(MicrophoneStatus.available),
+                  settingsStore: FakeSettingsStore(),
+                ),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          await tester.ensureVisible(
+            find.byKey(const Key('tuner-instrument-illustration')),
+          );
+          await tester.pumpAndSettle();
+          expect(find.byKey(const Key('tuner-cents-dial')), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+
+    testWidgets('string controls expose selected state and 48 pixel targets', (
+      tester,
+    ) async {
+      await pumpTuner(tester, FakeInput(MicrophoneStatus.available));
+      final string = find.byKey(const Key('tuner-string-5-E4'));
+      await tester.ensureVisible(string);
+      expect(tester.getSize(string).width, greaterThanOrEqualTo(48));
+      expect(tester.getSize(string).height, greaterThanOrEqualTo(48));
+      Semantics state() => tester.widget<Semantics>(
+        find
+            .ancestor(
+              of: string,
+              matching: find.byWidgetPredicate(
+                (w) => w is Semantics && w.properties.label == 'String 6, E4',
+              ),
+            )
+            .first,
+      );
+      expect(state().properties.selected, isFalse);
+      await tester.tap(string);
+      await tester.pump();
+      expect(state().properties.selected, isTrue);
+    });
+
+    for (final light in [false, true]) {
+      for (final offset in [10, 30]) {
+        testWidgets(
+          'tuner cents indicator has contrast for $offset cents in ${light ? 'light' : 'dark'} mode',
+          (tester) async {
+            final input = FakeInput(MicrophoneStatus.available);
+            await tester.pumpWidget(
+              MaterialApp(
+                theme: ThemeProvider().getTheme(light),
+                home: Scaffold(
+                  body: TunerScreen(
+                    inputFactory: () => input,
+                    settingsStore: FakeSettingsStore(),
+                  ),
+                ),
+              ),
+            );
+            await tester.ensureVisible(find.text('Start tuning'));
+            await tester.tap(find.text('Start tuning'));
+            await tester.pump();
+            final frequency = 110 * math.pow(2, offset / 1200);
+            emitPitch(input, frequency.toDouble());
+            emitPitch(input, frequency.toDouble());
+            await tester.pump();
+            final color = tester
+                .widget<Text>(find.byKey(const Key('tuner-target-note')))
+                .style!
+                .color!;
+            final background = light ? Colors.white : const Color(0xFF101B1E);
+            final first = color.computeLuminance(),
+                second = background.computeLuminance();
+            final ratio =
+                (math.max(first, second) + .05) /
+                (math.min(first, second) + .05);
+            expect(ratio, greaterThanOrEqualTo(4.5));
+          },
+        );
+      }
+    }
+
     testWidgets('releases the microphone when the screen is disposed', (
       tester,
     ) async {
@@ -422,6 +600,16 @@ void main() {
       await tester.tap(find.text('Bass').first);
       await tester.pump();
       expect(find.byKey(const Key('tuner-string-0-E1')), findsOneWidget);
+      expect(
+        (tester
+                    .widget<CustomPaint>(
+                      find.byKey(const Key('tuner-instrument-illustration')),
+                    )
+                    .painter!
+                as InstrumentStringPainter)
+            .isBass,
+        isTrue,
+      );
       expect(find.byKey(const Key('tuner-string-5-E4')), findsNothing);
       expect(store.settings.selectedId, contains('bass'));
       await show();
@@ -570,6 +758,16 @@ void main() {
       expect(find.byKey(const Key('tuner-string-0-E2')), findsOneWidget);
       expect(find.byKey(const Key('tuner-string-1-E2')), findsOneWidget);
       expect(find.byKey(const Key('tuner-string-11-E4')), findsOneWidget);
+      expect(
+        (tester
+                    .widget<CustomPaint>(
+                      find.byKey(const Key('tuner-instrument-illustration')),
+                    )
+                    .painter!
+                as InstrumentStringPainter)
+            .stringCount,
+        12,
+      );
       expect(tester.takeException(), isNull);
     });
   });

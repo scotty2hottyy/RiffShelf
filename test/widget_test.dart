@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
 import 'package:riffshelf/app.dart';
+import 'package:riffshelf/core/theme_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -9,10 +11,18 @@ void main() {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   });
+
+  Widget buildTestApp() {
+    return ChangeNotifierProvider(
+      create: (_) => ThemeProvider(),
+      child: const RiffShelfApp(),
+    );
+  }
+
   testWidgets('shows all navigation destinations and the initial screen', (
     tester,
   ) async {
-    await tester.pumpWidget(const RiffShelfApp());
+    await tester.pumpWidget(buildTestApp());
 
     expect(find.text('Discover'), findsWidgets);
     expect(find.text('Song or artist'), findsOneWidget);
@@ -23,7 +33,7 @@ void main() {
   });
 
   testWidgets('switches tabs and restores the selected tab', (tester) async {
-    await tester.pumpWidget(const RiffShelfApp());
+    await tester.pumpWidget(buildTestApp());
 
     await tester.tap(find.text('Practice').last);
     await tester.pumpAndSettle();
@@ -53,7 +63,7 @@ void main() {
   });
 
   testWidgets('keeps pages mounted when switching tabs', (tester) async {
-    await tester.pumpWidget(const RiffShelfApp());
+    await tester.pumpWidget(buildTestApp());
 
     final indexedStack = tester.widget<IndexedStack>(
       find.byType(IndexedStack).first,
@@ -82,7 +92,7 @@ void main() {
         tester.view.resetPadding();
       });
 
-      await tester.pumpWidget(const RiffShelfApp());
+      await tester.pumpWidget(buildTestApp());
       for (final destination in [
         'Practice',
         'Tuner',

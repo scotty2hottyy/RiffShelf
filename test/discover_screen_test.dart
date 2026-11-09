@@ -1,4 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:riffshelf/core/theme_provider.dart';
+import 'package:riffshelf/features/artwork/album_art.dart';
+import 'package:riffshelf/features/artwork/artwork_service.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -21,11 +27,13 @@ const result = TabSearchResult(
 class Provider implements TabSourceProvider, TrackSelectableTabSourceProvider {
   Completer<List<TabSearchResult>> pending = Completer();
   int searchCalls = 0;
+  TabSearchQuery? lastQuery;
   @override
   String get name => 'Mock';
   @override
   Future<List<TabSearchResult>> search(TabSearchQuery query) {
     searchCalls++;
+    lastQuery = query;
     return pending.future;
   }
 
@@ -56,10 +64,34 @@ class Provider implements TabSourceProvider, TrackSelectableTabSourceProvider {
   );
 }
 
+class FailingProvider implements TabSourceProvider {
+  @override
+  String get name => 'Unavailable';
+  @override
+  Future<List<TabSearchResult>> search(TabSearchQuery query) async =>
+      throw const TabProviderException('Offline');
+  @override
+  Future<SavedTab> fetchTab(TabSearchResult result) async =>
+      throw UnimplementedError();
+}
+
+class BackendSearch implements TabSearchProvider {
+  TabSearchQuery? lastQuery;
+  @override
+  Future<List<TabSearchResult>> search(TabSearchQuery query) async {
+    lastQuery = query;
+    return [result];
+  }
+}
+
 class MemoryRepository implements TabRepository {
   final tabs = <SavedTab>[];
+  bool duplicate = false;
+  bool failSave = false;
   @override
   Future<SavedTab> save(SavedTab tab) async {
+    if (duplicate) throw const DuplicateTabException();
+    if (failSave) throw StateError('Storage unavailable');
     final saved = tab.copyWith(id: 1);
     tabs.add(saved);
     return saved;
@@ -78,6 +110,47 @@ class MemoryRepository implements TabRepository {
   Future<void> delete(int id) async => tabs.removeWhere((t) => t.id == id);
   @override
   Future<void> close() async {}
+}
+
+class AutomaticMemoryRepository extends MemoryRepository
+    implements AutomaticArtworkRepository {
+  @override
+  Future<bool> setArtworkIfUnselected({
+    required int id,
+    required String artist,
+    required String title,
+    required String artwork,
+  }) async {
+    final index = tabs.indexWhere(
+      (tab) =>
+          tab.id == id &&
+          tab.artist == artist &&
+          tab.title == title &&
+          tab.artwork == null &&
+          tab.albumArt == null,
+    );
+    if (index < 0) return false;
+    tabs[index] = tabs[index].copyWith(artwork: artwork);
+    return true;
+  }
+}
+
+class DeferredAutomaticArtwork extends ArtworkService {
+  final pending = Completer<AlbumCandidate?>();
+  int lookups = 0;
+  @override
+  Future<List<AlbumCandidate>> automaticCandidates(
+    String artist,
+    String title,
+  ) async {
+    lookups++;
+    final candidate = await pending.future;
+    return candidate == null ? [] : [candidate];
+  }
+
+  @override
+  Future<String> select(AlbumCandidate album) async =>
+      jsonEncode({'release_id': album.id, 'local_path': '/cached/cover.img'});
 }
 
 void main() {
@@ -161,9 +234,12 @@ void main() {
     await tester.tap(find.byType(TextField));
     await tester.pump();
     expect(fieldHasFocus(tester), isTrue);
+    final focus = tester
+        .widget<EditableText>(find.byType(EditableText))
+        .focusNode;
     await tester.drag(find.byType(ListView), const Offset(0, -250));
     await tester.pump();
-    expect(fieldHasFocus(tester), isFalse);
+    expect(focus.hasFocus, isFalse);
   });
 
   testWidgets('loading and empty states', (tester) async {
@@ -208,4 +284,306 @@ void main() {
       contains('2'),
     );
   });
+  testWidgets('Save on card preserves selection and duplicate validation', (
+    tester,
+  ) async {
+    repository.duplicate = true;
+    await start(tester);
+    provider.pending.complete([result]);
+    await tester.pumpAndSettle();
+    expect(find.text('Artist'), findsOneWidget);
+    expect(find.text('Guitar'), findsOneWidget);
+    expect(find.text('Mock'), findsOneWidget);
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Choose an arrangement'), findsOneWidget);
+    await tester.tap(find.textContaining('Lead · Guitar'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save to Library'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('This arrangement is already in your library.'),
+      findsOneWidget,
+    );
+    expect(repository.tabs, isEmpty);
+  });
+
+  testWidgets('instrument selection reaches search', (tester) async {
+    await mount(tester);
+    await tester.tap(find.text('Guitar and bass'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bass').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Song');
+    await tester.tap(find.text('Search'));
+    await tester.pump();
+    expect(provider.lastQuery!.instrument, InstrumentType.bass);
+    provider.pending.complete([]);
+    await tester.pumpAndSettle();
+  });
+
+  for (final light in [true, false]) {
+    testWidgets(
+      'cards fit small screens with large text in ${light ? 'light' : 'dark'} mode',
+      (tester) async {
+        tester.view.physicalSize = const Size(320, 640);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ThemeProvider().getTheme(light),
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(context)
+                  .copyWith(textScaler: const TextScaler.linear(1.6)),
+              child: child!,
+            ),
+            home: Scaffold(
+              body: DiscoverScreen(
+                service: TabSearchService([provider]),
+                repository: repository,
+              ),
+            ),
+          ),
+        );
+        await tester.enterText(find.byType(TextField), 'Song');
+        await tester.ensureVisible(find.text('Search'));
+        await tester.tap(find.text('Search'));
+        await tester.pump();
+        expect(find.byType(LinearProgressIndicator), findsOneWidget);
+        provider.pending.complete([
+          const TabSearchResult(
+            externalId: '1',
+            title: 'A long song title for a small screen',
+            artist: 'A long artist name',
+            instrument: InstrumentType.bass,
+            sourceName: 'Mock',
+            sourceUrl: 'https://example.com',
+            tuning: ['E', 'A', 'D', 'G'],
+          ),
+        ]);
+        await tester.pump();
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)),
+        );
+        await tester.pump();
+        await tester.scrollUntilVisible(
+          find.text('Save'),
+          180,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pump();
+        expect(find.text('E A D G'), findsOneWidget);
+        expect(find.text('Bass'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets(
+    'uses matching saved artwork and falls back when file is missing',
+    (tester) async {
+      final dir = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('discover_art'),
+      ))!;
+      addTearDown(() => dir.delete(recursive: true));
+      final file = File('${dir.path}/cover.png');
+      await tester.runAsync(
+        () => file.writeAsBytes(
+          base64Decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=',
+          ),
+        ),
+      );
+      repository.tabs.add(
+        SavedTab(
+          id: 1,
+          title: 'Song',
+          artist: 'Artist',
+          source: 'Mock',
+          sourceId: '1',
+          sourceUrl: result.sourceUrl,
+          instrument: InstrumentType.guitar,
+          stringCount: 2,
+          tuning: const ['E', 'A'],
+          asciiTab: 'E|-0-',
+          artwork: jsonEncode({'local_path': file.path}),
+        ),
+      );
+      await start(tester);
+      provider.pending.complete([result]);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<AlbumArt>(find.byType(AlbumArt)).tab.artwork,
+        isNotNull,
+      );
+      expect(find.byType(Image), findsOneWidget);
+      await tester.runAsync(() => file.delete());
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+      // A fresh result with no matching saved artwork uses the same offline fallback.
+      repository.tabs.clear();
+      provider.pending = Completer();
+      await tester.tap(find.text('Search'));
+      await tester.pump();
+      provider.pending.complete([result]);
+      await tester.pumpAndSettle();
+      // Refreshing artwork occurs when returning from preview; verify the reusable widget's missing-file fallback separately.
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AlbumArt(
+            tab: SavedTab(
+              title: 'Song',
+              artist: 'Artist',
+              source: 'Mock',
+              sourceUrl: '',
+              instrument: InstrumentType.guitar,
+              stringCount: 1,
+              tuning: const [],
+              artwork: jsonEncode({'local_path': '${dir.path}/missing.png'}),
+            ),
+            size: 70,
+          ),
+        ),
+      );
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.album_outlined), findsOneWidget);
+    },
+  );
+  testWidgets('partial provider failures leave results usable', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DiscoverScreen(
+            service: TabSearchService([provider, FailingProvider()]),
+            repository: repository,
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(find.byType(TextField), 'Song');
+    await tester.tap(find.text('Search'));
+    await tester.pump();
+    provider.pending.complete([result]);
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Some providers are unavailable: Unavailable'),
+      findsOneWidget,
+    );
+    expect(find.text('Retry providers'), findsOneWidget);
+    expect(find.text('Save'), findsOneWidget);
+  });
+
+  testWidgets(
+    'configured backend search still displays cards and fetches via source',
+    (tester) async {
+      final backend = BackendSearch();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: DiscoverScreen(
+              service: TabSearchService([provider], searchProvider: backend),
+              repository: repository,
+            ),
+          ),
+        ),
+      );
+      await tester.enterText(find.byType(TextField), 'Song');
+      await tester.tap(find.text('Search'));
+      await tester.pumpAndSettle();
+      expect(backend.lastQuery!.text, 'Song');
+      expect(provider.searchCalls, 0);
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(find.text('Choose an arrangement'), findsOneWidget);
+    },
+  );
+  testWidgets('timeout shows retry and can recover', (tester) async {
+    await start(tester);
+    provider.pending.completeError(
+      const TabProviderException(
+        'Search timed out.',
+        kind: TabProviderErrorKind.timeout,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('timed out'), findsOneWidget);
+    provider.pending = Completer();
+    await tester.tap(find.text('Retry'));
+    await tester.pump();
+    provider.pending.complete([result]);
+    await tester.pumpAndSettle();
+    expect(find.text('Save'), findsOneWidget);
+  });
+  testWidgets('failed save shows retry and retains preview', (tester) async {
+    repository.failSave = true;
+    await start(tester);
+    provider.pending.complete([result]);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Lead · Guitar'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save to Library'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Could not save this tab'), findsOneWidget);
+    expect(find.textContaining('e|--2--|'), findsOneWidget);
+    repository.failSave = false;
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(find.text('Saved to Library'), findsOneWidget);
+  });
+  testWidgets(
+    'saving a discovered tab starts a nonblocking automatic artwork lookup',
+    (tester) async {
+      final repo = AutomaticMemoryRepository();
+      final artwork = DeferredAutomaticArtwork();
+      provider.pending = Completer();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: DiscoverScreen(
+              service: TabSearchService([provider]),
+              repository: repo,
+              artworkService: artwork,
+            ),
+          ),
+        ),
+      );
+      await tester.enterText(find.byType(TextField), 'Song');
+      await tester.tap(find.text('Search'));
+      await tester.pump();
+      provider.pending.complete([result]);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('Lead · Guitar'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save to Library'));
+      await tester.pump();
+      expect(find.text('Saved to Library'), findsOneWidget);
+      expect(repo.tabs.single.artwork, isNull);
+      expect(artwork.lookups, 1);
+      artwork.pending.complete(
+        const AlbumCandidate(
+          'a1ed26f7-3f11-4633-a3c7-4a4abfa3271f',
+          'Album',
+          'Artist',
+          '2000',
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(
+        artworkMetadata(repo.tabs.single)!['release_id'],
+        'a1ed26f7-3f11-4633-a3c7-4a4abfa3271f',
+      );
+    },
+  );
 }

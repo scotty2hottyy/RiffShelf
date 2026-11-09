@@ -50,3 +50,11 @@ def test_search_configuration(monkeypatch):
     monkeypatch.setenv("RIFFSHELF_SEARCH_RATE_LIMIT_PER_MINUTE", "0")
     with pytest.raises(ValueError, match="RIFFSHELF_SEARCH_RATE_LIMIT_PER_MINUTE"):
         Settings.from_environment()
+
+
+def test_musicbrainz_timeout_configuration(monkeypatch):
+    monkeypatch.setenv("RIFFSHELF_MUSICBRAINZ_TIMEOUT_SECONDS", "2.5")
+    assert Settings.from_environment().musicbrainz_timeout_seconds == 2.5
+    monkeypatch.setenv("RIFFSHELF_MUSICBRAINZ_TIMEOUT_SECONDS", "0")
+    with pytest.raises(ValueError, match="RIFFSHELF_MUSICBRAINZ_TIMEOUT_SECONDS"):
+        Settings.from_environment()

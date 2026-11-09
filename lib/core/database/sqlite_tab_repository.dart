@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -8,7 +9,7 @@ import '../models/saved_tab.dart';
 import '../models/tuning.dart';
 import 'tab_repository.dart';
 
-class SqliteTabRepository implements TabRepository {
+class SqliteTabRepository implements TabRepository, AutomaticArtworkRepository {
   SqliteTabRepository(this._databaseFactory, [this._databasePath]);
 
   static final ValueNotifier<int> changes = ValueNotifier(0);
@@ -29,7 +30,7 @@ class SqliteTabRepository implements TabRepository {
     return _database ??= await _databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 3,
+        version: 4,
         onCreate: (db, version) async {
           await db.execute('''
           CREATE TABLE saved_tabs (
@@ -54,7 +55,8 @@ class SqliteTabRepository implements TabRepository {
             source_data TEXT,
             classification TEXT NOT NULL DEFAULT 'other',
             is_favorite INTEGER NOT NULL DEFAULT 0,
-            album_art TEXT
+            album_art TEXT,
+            artwork TEXT
           )
         ''');
           await db.execute(
@@ -86,6 +88,9 @@ class SqliteTabRepository implements TabRepository {
             await db.execute(
               'CREATE UNIQUE INDEX saved_tabs_import_key ON saved_tabs(import_key)',
             );
+          }
+          if (oldVersion < 4) {
+            await db.execute('ALTER TABLE saved_tabs ADD COLUMN artwork TEXT');
           }
         },
       ),
@@ -155,6 +160,15 @@ class SqliteTabRepository implements TabRepository {
     }
     final db = await _db;
     if (tab.id != null) {
+      final before = await db.query(
+        'saved_tabs',
+        columns: ['artwork'],
+        where: 'id = ?',
+        whereArgs: [tab.id],
+      );
+      final previousArtwork = before.isEmpty
+          ? null
+          : before.single['artwork'] as String?;
       final count = await db.update(
         'saved_tabs',
         tab.toDatabaseMap()..remove('id'),
@@ -162,6 +176,9 @@ class SqliteTabRepository implements TabRepository {
         whereArgs: [tab.id],
       );
       if (count == 0) throw StateError('Tab does not exist: ${tab.id}');
+      if (previousArtwork != tab.artwork) {
+        await _cleanupArtwork(db, previousArtwork);
+      }
       return tab;
     }
     try {
@@ -189,7 +206,65 @@ class SqliteTabRepository implements TabRepository {
 
   @override
   Future<void> delete(int id) async {
-    await (await _db).delete('saved_tabs', where: 'id = ?', whereArgs: [id]);
+    final db = await _db;
+    final before = await db.query(
+      'saved_tabs',
+      columns: ['artwork'],
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    await db.delete('saved_tabs', where: 'id = ?', whereArgs: [id]);
+    await _cleanupArtwork(
+      db,
+      before.isEmpty ? null : before.single['artwork'] as String?,
+    );
+  }
+
+  @override
+  Future<bool> setArtworkIfUnselected({
+    required int id,
+    required String artist,
+    required String title,
+    required String artwork,
+  }) async {
+    final count = await (await _db).update(
+      'saved_tabs',
+      {'artwork': artwork},
+      where: 'id = ? AND artist = ? AND title = ? AND artwork IS NULL AND album_art IS NULL',
+      whereArgs: [id, artist, title],
+    );
+    if (count != 0) changes.value++;
+    return count != 0;
+  }
+
+  // Only remove the previous image; a directory sweep can race an in-flight download.
+  Future<void> _cleanupArtwork(Database db, String? previous) async {
+    try {
+      final data = jsonDecode(previous ?? 'null');
+      if (data is! Map || data['local_path'] is! String) return;
+      final path = data['local_path'] as String;
+      final directory = p.join(
+        await _databaseFactory.getDatabasesPath(),
+        'artwork',
+      );
+      if (p.dirname(path) != directory ||
+          !RegExp(r'^[0-9a-f-]{36}\.img$').hasMatch(p.basename(path))) {
+        return;
+      }
+      final rows = await db.query('saved_tabs', columns: ['artwork']);
+      for (final row in rows) {
+        try {
+          final value = jsonDecode(row['artwork'] as String? ?? 'null');
+          if (value is Map && value['local_path'] == path) return;
+        } catch (_) {
+          return;
+        } // Preserve files when another reference cannot be decoded.
+      }
+      final file = File(path);
+      if (await file.exists()) await file.delete();
+    } catch (_) {
+      /* Cleanup must never affect saved tabs. */
+    }
   }
 
   @override

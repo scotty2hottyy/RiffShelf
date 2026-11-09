@@ -129,6 +129,31 @@ void main() {
     await repo.close();
   });
 
+  test('migrates version 3 and preserves legacy artwork', () async {
+    final db = await factory.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 3,
+        onCreate: (db, version) async {
+          await db.execute(
+            'CREATE TABLE saved_tabs (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, artist TEXT NOT NULL, source TEXT NOT NULL, source_url TEXT NOT NULL, source_id TEXT, import_key TEXT, tab_type TEXT NOT NULL, track_name TEXT, instrument TEXT NOT NULL, string_count INTEGER NOT NULL, tuning TEXT NOT NULL, tuning_key TEXT NOT NULL, capo INTEGER NOT NULL, bpm INTEGER, tags TEXT NOT NULL, ascii_tab TEXT NOT NULL, structure TEXT NOT NULL, source_data TEXT, classification TEXT NOT NULL, is_favorite INTEGER NOT NULL, album_art TEXT)',
+          );
+          await db.insert(
+            'saved_tabs',
+            example().toDatabaseMap()..remove('artwork'),
+          );
+        },
+      ),
+    );
+    await db.close();
+    final repo = SqliteTabRepository(factory, path);
+    final loaded = (await repo.findTabs()).single;
+    expect(loaded.albumArt, 'cover.jpg');
+    expect(loaded.artwork, isNull);
+    expect(loaded.asciiTab, 'E|--0--');
+    await repo.close();
+  });
+
   test('migrates a version 1 library and retains its data', () async {
     final db = await factory.openDatabase(
       path,
@@ -142,7 +167,8 @@ void main() {
             ..remove('import_key')
             ..remove('classification')
             ..remove('is_favorite')
-            ..remove('album_art');
+            ..remove('album_art')
+            ..remove('artwork');
           await db.insert('saved_tabs', data);
         },
       ),

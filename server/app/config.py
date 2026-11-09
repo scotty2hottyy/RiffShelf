@@ -8,6 +8,7 @@ from dataclasses import dataclass
 class Settings:
     docs_enabled: bool = True
     songsterr_timeout_seconds: float = 8.0
+    musicbrainz_timeout_seconds: float = 5.0
     search_rate_limit_per_minute: int = 30
 
     @classmethod
@@ -16,10 +17,14 @@ class Settings:
         if value not in {"true", "false"}:
             raise ValueError("RIFFSHELF_DOCS_ENABLED must be true or false")
         timeout = float(os.environ.get("RIFFSHELF_SONGSTERR_TIMEOUT_SECONDS", "8"))
+        musicbrainz_timeout = float(os.environ.get("RIFFSHELF_MUSICBRAINZ_TIMEOUT_SECONDS", "5"))
         limit = int(os.environ.get("RIFFSHELF_SEARCH_RATE_LIMIT_PER_MINUTE", "30"))
         if not 0 < timeout <= 60:
             raise ValueError("RIFFSHELF_SONGSTERR_TIMEOUT_SECONDS must be between 0 and 60")
+        if not 0 < musicbrainz_timeout <= 30:
+            raise ValueError("RIFFSHELF_MUSICBRAINZ_TIMEOUT_SECONDS must be between 0 and 30")
         if limit < 1:
             raise ValueError("RIFFSHELF_SEARCH_RATE_LIMIT_PER_MINUTE must be positive")
         return cls(docs_enabled=value == "true", songsterr_timeout_seconds=timeout,
+                   musicbrainz_timeout_seconds=musicbrainz_timeout,
                    search_rate_limit_per_minute=limit)
