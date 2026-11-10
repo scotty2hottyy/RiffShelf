@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:riffshelf/core/theme_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:riffshelf/core/models/tuning.dart';
-import 'package:riffshelf/core/models/instrument_type.dart';
 import 'package:riffshelf/features/tuner/audio_input.dart';
 import 'package:riffshelf/features/tuner/pitch_detector.dart';
 import 'package:riffshelf/features/tuner/tuner_controller.dart';
@@ -134,7 +133,7 @@ void main() {
 
     test('validates names, counts, notes, and detector range', () {
       expect(
-        tuningValidationError('Seven', InstrumentType.guitar, [
+        tuningValidationError('Seven', TunerInstrument.guitar, [
           'B1',
           'E2',
           'A2',
@@ -146,7 +145,7 @@ void main() {
         isNull,
       );
       expect(
-        tuningValidationError('Five', InstrumentType.bass, [
+        tuningValidationError('Five', TunerInstrument.bass, [
           'B0',
           'E1',
           'A1',
@@ -158,17 +157,17 @@ void main() {
       expect(
         tuningValidationError(
           '',
-          InstrumentType.guitar,
+          TunerInstrument.guitar,
           TunerPresets.guitarStandard.notes,
         ),
         isNotNull,
       );
       expect(
-        tuningValidationError('Bad', InstrumentType.bass, ['E1', 'A1', 'D2']),
+        tuningValidationError('Bad', TunerInstrument.bass, ['E1', 'A1', 'D2']),
         isNotNull,
       );
       expect(
-        tuningValidationError('Bad', InstrumentType.guitar, [
+        tuningValidationError('Bad', TunerInstrument.guitar, [
           'H2',
           'A2',
           'D3',
@@ -179,7 +178,7 @@ void main() {
         isNotNull,
       );
       expect(
-        tuningValidationError('Bad', InstrumentType.guitar, [
+        tuningValidationError('Bad', TunerInstrument.guitar, [
           'C0',
           'A2',
           'D3',
@@ -198,7 +197,7 @@ void main() {
           id: 'one',
           preset: TuningPreset(
             name: 'Low B',
-            instrument: InstrumentType.bass,
+            instrument: TunerInstrument.bass,
             notes: ['B0', 'E1', 'A1', 'D2', 'G2'],
           ),
         );
@@ -724,7 +723,7 @@ void main() {
               id: 'twelve',
               preset: TuningPreset(
                 name: 'Twelve',
-                instrument: InstrumentType.guitar,
+                instrument: TunerInstrument.guitar,
                 notes: [
                   'E2',
                   'E2',

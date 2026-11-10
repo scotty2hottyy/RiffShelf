@@ -3,10 +3,21 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../core/models/tuning.dart';
-import '../core/models/instrument_type.dart';
 import '../features/tuner/audio_input.dart';
 import '../features/tuner/tuner_controller.dart';
 import '../features/tuner/tuning_store.dart';
+
+/// The default standard preset shown when an instrument is first selected.
+TuningPreset _standardPresetFor(TunerInstrument instrument) =>
+    switch (instrument) {
+      TunerInstrument.guitar => TunerPresets.guitarStandard,
+      TunerInstrument.bass => TunerPresets.bassStandard,
+      TunerInstrument.saxophone => TunerPresets.saxophoneStandard,
+      TunerInstrument.clarinet => TunerPresets.clarinetStandard,
+      TunerInstrument.flute => TunerPresets.fluteStandard,
+      TunerInstrument.trumpet => TunerPresets.trumpetStandard,
+      TunerInstrument.frenchHorn => TunerPresets.frenchHornStandard,
+    };
 
 class TunerScreen extends StatefulWidget {
   const TunerScreen({
@@ -124,9 +135,7 @@ class _TunerScreenState extends State<TunerScreen> with WidgetsBindingObserver {
       ],
     );
     if (_selectedId == custom.id) {
-      final fallback = custom.preset.instrument == InstrumentType.bass
-          ? TunerPresets.bassStandard
-          : TunerPresets.guitarStandard;
+      final fallback = _standardPresetFor(custom.preset.instrument);
       _select(fallback, _builtInId(fallback));
     } else {
       _saveSettings();
@@ -241,14 +250,12 @@ class _PresetPicker extends StatelessWidget {
         Wrap(
           spacing: 8,
           children: [
-            for (final type in [InstrumentType.guitar, InstrumentType.bass])
+            for (final type in TunerInstrument.values)
               ChoiceChip(
                 label: Text(type.label),
                 selected: instrument == type,
                 onSelected: (_) {
-                  final preset = type == InstrumentType.guitar
-                      ? TunerPresets.guitarStandard
-                      : TunerPresets.bassStandard;
+                  final preset = _standardPresetFor(type);
                   onSelect(preset, builtInId(preset));
                 },
               ),
@@ -278,11 +285,12 @@ class _PresetPicker extends StatelessWidget {
         Wrap(
           spacing: 8,
           children: [
-            TextButton.icon(
-              onPressed: onCreate,
-              icon: const Icon(Icons.add),
-              label: const Text('New tuning'),
-            ),
+            if (instrument.hasStrings)
+              TextButton.icon(
+                onPressed: onCreate,
+                icon: const Icon(Icons.add),
+                label: const Text('New tuning'),
+              ),
             if (selectedCustom != null) ...[
               TextButton.icon(
                 onPressed: () => onEdit(selectedCustom),
@@ -321,7 +329,7 @@ Future<TuningPreset?> _showTuningDialog(
     context: context,
     builder: (context) => StatefulBuilder(
       builder: (context, setDialogState) {
-        final counts = instrument == InstrumentType.guitar
+        final counts = instrument == TunerInstrument.guitar
             ? [6, 7, 8, 9, 10, 11, 12]
             : [4, 5, 6];
         return AlertDialog(
@@ -337,14 +345,14 @@ Future<TuningPreset?> _showTuningDialog(
                     controller: name,
                     decoration: const InputDecoration(labelText: 'Name'),
                   ),
-                  DropdownButtonFormField<InstrumentType>(
+                  DropdownButtonFormField<TunerInstrument>(
                     key: const Key('tuning-instrument'),
                     initialValue: instrument,
                     decoration: const InputDecoration(labelText: 'Instrument'),
                     items: [
                       for (final type in [
-                        InstrumentType.guitar,
-                        InstrumentType.bass,
+                        TunerInstrument.guitar,
+                        TunerInstrument.bass,
                       ])
                         DropdownMenuItem(value: type, child: Text(type.label)),
                     ],
@@ -352,7 +360,7 @@ Future<TuningPreset?> _showTuningDialog(
                       if (value == null) return;
                       setDialogState(() {
                         instrument = value;
-                        final defaults = value == InstrumentType.guitar
+                        final defaults = value == TunerInstrument.guitar
                             ? TunerPresets.guitarStandard.notes
                             : TunerPresets.bassStandard.notes;
                         count = defaults.length;
@@ -453,6 +461,7 @@ class _MeterCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final reading = controller.reading;
+    final hasStrings = controller.preset.instrument.hasStrings;
     final accent = theme.brightness == Brightness.dark
         ? const Color(0xFF54E8D5)
         : const Color(0xFF006C65);
@@ -481,7 +490,8 @@ class _MeterCard extends StatelessWidget {
         children: [
           Text(
             controller.selectedStringIndex == null
-                ? reading?.targetNote ?? '--'
+                ? reading?.targetNote ??
+                      (hasStrings ? '--' : controller.preset.notes.first)
                 : controller.preset.notes[controller.selectedStringIndex!],
             key: const Key('tuner-target-note'),
             style: theme.textTheme.displayLarge?.copyWith(
@@ -491,7 +501,7 @@ class _MeterCard extends StatelessWidget {
           ),
           Text(
             reading == null
-                ? 'Play a string'
+                ? (hasStrings ? 'Play a string' : 'Play a note')
                 : 'Detected ${reading.note.label} · '
                       '${reading.frequency.toStringAsFixed(1)} Hz · '
                       '${reading.targetCents >= 0 ? '+' : ''}'
@@ -552,93 +562,97 @@ class _MeterCard extends StatelessWidget {
               child: const Text('Automatic detection'),
             ),
           const SizedBox(height: 12),
-          Semantics(
-            label:
-                '${controller.preset.instrument.label} illustration, ${controller.preset.stringCount} strings',
-            child: SizedBox(
-              height: 112,
-              width: double.infinity,
-              child: CustomPaint(
-                key: const Key('tuner-instrument-illustration'),
-                painter: InstrumentStringPainter(
-                  stringCount: controller.preset.notes.length,
-                  isBass: controller.preset.instrument == InstrumentType.bass,
-                  activeStrings: {
-                    for (var i = 0; i < controller.preset.notes.length; i++)
-                      if (controller.selectedStringIndex == i ||
-                          (controller.selectedStringIndex == null &&
-                              reading?.targetNote ==
-                                  controller.preset.notes[i]))
-                        i,
-                  },
-                  accent: accent,
-                  outline: theme.colorScheme.onSurfaceVariant,
-                  surface: theme.brightness == Brightness.dark
-                      ? const Color(0xFF17292C)
-                      : const Color(0xFFE2EEEA),
+          if (hasStrings) ...[
+            Semantics(
+              label:
+                  '${controller.preset.instrument.label} illustration, ${controller.preset.stringCount} strings',
+              child: SizedBox(
+                height: 112,
+                width: double.infinity,
+                child: CustomPaint(
+                  key: const Key('tuner-instrument-illustration'),
+                  painter: InstrumentStringPainter(
+                    stringCount: controller.preset.notes.length,
+                    isBass:
+                        controller.preset.instrument == TunerInstrument.bass,
+                    activeStrings: {
+                      for (var i = 0; i < controller.preset.notes.length; i++)
+                        if (controller.selectedStringIndex == i ||
+                            (controller.selectedStringIndex == null &&
+                                reading?.targetNote ==
+                                    controller.preset.notes[i]))
+                          i,
+                    },
+                    accent: accent,
+                    outline: theme.colorScheme.onSurfaceVariant,
+                    surface: theme.brightness == Brightness.dark
+                        ? const Color(0xFF17292C)
+                        : const Color(0xFFE2EEEA),
+                  ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: 12),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final notes = controller.preset.notes;
-              final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
-              if (notes.length > 6 ||
-                  textScale > 1.3 ||
-                  (notes.length != 6 &&
-                      notes.length * 56 - 8 > constraints.maxWidth)) {
-                return Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 8,
-                  runSpacing: 8,
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final notes = controller.preset.notes;
+                final textScale =
+                    MediaQuery.textScalerOf(context).scale(14) / 14;
+                if (notes.length > 6 ||
+                    textScale > 1.3 ||
+                    (notes.length != 6 &&
+                        notes.length * 56 - 8 > constraints.maxWidth)) {
+                  return Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (var index = 0; index < notes.length; index++)
+                        _StringBadge(
+                          index: index,
+                          note: notes[index],
+                          active:
+                              controller.selectedStringIndex == index ||
+                              (controller.selectedStringIndex == null &&
+                                  reading?.targetNote == notes[index]),
+                          color: accent,
+                          onTap: () => controller.selectString(index),
+                        ),
+                    ],
+                  );
+                }
+                Widget row(List<String> rowNotes, int start, String key) => Row(
+                  key: Key(key),
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    for (var index = 0; index < notes.length; index++)
+                    for (var index = 0; index < rowNotes.length; index++) ...[
+                      if (index > 0) const SizedBox(width: 8),
                       _StringBadge(
-                        index: index,
-                        note: notes[index],
+                        index: start + index,
+                        note: rowNotes[index],
                         active:
-                            controller.selectedStringIndex == index ||
+                            controller.selectedStringIndex == start + index ||
                             (controller.selectedStringIndex == null &&
-                                reading?.targetNote == notes[index]),
+                                reading?.targetNote == rowNotes[index]),
                         color: accent,
-                        onTap: () => controller.selectString(index),
+                        onTap: () => controller.selectString(start + index),
                       ),
+                    ],
                   ],
                 );
-              }
-              Widget row(List<String> rowNotes, int start, String key) => Row(
-                key: Key(key),
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  for (var index = 0; index < rowNotes.length; index++) ...[
-                    if (index > 0) const SizedBox(width: 8),
-                    _StringBadge(
-                      index: start + index,
-                      note: rowNotes[index],
-                      active:
-                          controller.selectedStringIndex == start + index ||
-                          (controller.selectedStringIndex == null &&
-                              reading?.targetNote == rowNotes[index]),
-                      color: accent,
-                      onTap: () => controller.selectString(start + index),
-                    ),
-                  ],
-                ],
-              );
-              if (notes.length == 6 && constraints.maxWidth < 328) {
-                return Column(
-                  children: [
-                    row(notes.sublist(0, 3), 0, 'tuner-strings-first-row'),
-                    const SizedBox(height: 8),
-                    row(notes.sublist(3), 3, 'tuner-strings-second-row'),
-                  ],
-                );
-              }
-              return row(notes, 0, 'tuner-strings-single-row');
-            },
-          ),
+                if (notes.length == 6 && constraints.maxWidth < 328) {
+                  return Column(
+                    children: [
+                      row(notes.sublist(0, 3), 0, 'tuner-strings-first-row'),
+                      const SizedBox(height: 8),
+                      row(notes.sublist(3), 3, 'tuner-strings-second-row'),
+                    ],
+                  );
+                }
+                return row(notes, 0, 'tuner-strings-single-row');
+              },
+            ),
+          ],
         ],
       ),
     );

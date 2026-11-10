@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:riffshelf/core/models/instrument_type.dart';
 import 'package:riffshelf/core/models/saved_tab.dart';
 import 'package:riffshelf/core/models/tab_structure.dart';
+import 'package:riffshelf/core/models/tuning.dart';
 import 'package:riffshelf/features/tabs/practice_preparation_screen.dart';
 import 'package:riffshelf/features/tabs/practice_session_screen.dart';
 import 'package:riffshelf/features/tabs/tab_detail_screen.dart';
@@ -45,7 +46,10 @@ void main() {
       await tester.pumpAndSettle();
       final tuner = tester.widget<TunerScreen>(find.byType(TunerScreen));
       expect(tuner.preset!.notes, selected.tuning);
-      expect(tuner.preset!.instrument, instrument);
+      expect(
+        tuner.preset!.instrument,
+        TunerInstrument.fromTabInstrument(instrument),
+      );
       expect(find.text('Start tuning'), findsOneWidget);
       await tester.tap(find.text('Done tuning'));
       await tester.pumpAndSettle();
