@@ -523,6 +523,52 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('zoom clamps floating-point overshoot at both endpoints', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: PracticeSessionScreen(tab: buildTab())),
+    );
+    // Continuous sliders denormalize their position using this calculation.
+    // Its rounded result is slightly greater than the declared maximum.
+    final upperEndpoint = 0.6 + (1.8 - 0.6);
+    expect(upperEndpoint, greaterThan(1.8));
+    final zoom = find.byType(Slider);
+    tester.widget<Slider>(zoom).onChanged!(upperEndpoint);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(tester.widget<Slider>(zoom).value, 1.8);
+    tester.widget<Slider>(zoom).onChanged!(0.6 - 1e-15);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(tester.widget<Slider>(zoom).value, 0.6);
+  });
+
+  testWidgets('dragging zoom to both ends repeatedly stays in range', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: PracticeSessionScreen(tab: buildTab())),
+    );
+    final zoom = find.byType(Slider);
+    await tester.ensureVisible(zoom);
+    for (var i = 0; i < 3; i++) {
+      await tester.ensureVisible(zoom);
+      await tester.pumpAndSettle();
+      await tester.drag(zoom, const Offset(2000, 0));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(tester.widget<Slider>(zoom).value, 1.8);
+      // Zoom changes the content height, so scroll the control back into view.
+      await tester.ensureVisible(zoom);
+      await tester.pumpAndSettle();
+      await tester.drag(zoom, const Offset(-2000, 0));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(tester.widget<Slider>(zoom).value, 0.6);
+    }
+  });
+
   for (final light in [true, false]) {
     testWidgets(
       'practice fits small screens and large text in ${light ? 'light' : 'dark'} theme',
