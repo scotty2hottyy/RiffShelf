@@ -153,12 +153,51 @@ class DeferredAutomaticArtwork extends ArtworkService {
       jsonEncode({'release_id': album.id, 'local_path': '/cached/cover.img'});
 }
 
+/// An artwork service that never reaches the network, used by default so
+/// unrelated tests are not affected by the automatic search-result preview
+/// lookup. Tests covering that lookup supply their own fake instead.
+class NoopArtworkService extends ArtworkService {
+  @override
+  Future<List<AlbumCandidate>> automaticCandidates(
+    String artist,
+    String title,
+  ) async => [];
+}
+
+/// Immediately resolves a single ranked candidate, recording every
+/// artist/title pair looked up so tests can assert the preview lookup is
+/// deduplicated instead of repeated per card.
+class ImmediateArtworkService extends ArtworkService {
+  final lookups = <String>[];
+  @override
+  Future<List<AlbumCandidate>> automaticCandidates(
+    String artist,
+    String title,
+  ) async {
+    lookups.add('$artist|$title');
+    return const [
+      AlbumCandidate(
+        'a1ed26f7-3f11-4633-a3c7-4a4abfa3271f',
+        'Album',
+        'Artist',
+        '2000',
+      ),
+    ];
+  }
+
+  @override
+  Future<String> select(AlbumCandidate album) async =>
+      jsonEncode({'release_id': album.id, 'local_path': '/cached/cover.img'});
+}
+
 void main() {
   late MemoryRepository repository;
   late Provider provider;
+  late NoopArtworkService noopArtwork;
   setUp(() {
     repository = MemoryRepository();
     provider = Provider();
+    noopArtwork = NoopArtworkService();
   });
   tearDown(() async => repository.close());
   Future<void> mount(WidgetTester tester) async {
@@ -169,6 +208,7 @@ void main() {
           body: DiscoverScreen(
             service: TabSearchService([provider]),
             repository: repository,
+            artworkService: noopArtwork,
           ),
         ),
       ),
@@ -342,6 +382,7 @@ void main() {
               body: DiscoverScreen(
                 service: TabSearchService([provider]),
                 repository: repository,
+                artworkService: noopArtwork,
               ),
             ),
           ),
@@ -460,6 +501,7 @@ void main() {
           body: DiscoverScreen(
             service: TabSearchService([provider, FailingProvider()]),
             repository: repository,
+            artworkService: noopArtwork,
           ),
         ),
       ),
@@ -490,6 +532,7 @@ void main() {
             body: DiscoverScreen(
               service: TabSearchService([provider], searchProvider: backend),
               repository: repository,
+              artworkService: noopArtwork,
             ),
           ),
         ),
@@ -569,7 +612,11 @@ void main() {
       await tester.pump();
       expect(find.text('Saved to Library'), findsOneWidget);
       expect(repo.tabs.single.artwork, isNull);
-      expect(artwork.lookups, 1);
+      // One lookup from the automatic search-result preview and one from
+      // the save-time automatic assignment; the real ArtworkService caches
+      // identical artist/title lookups so this does not mean two network
+      // requests in production.
+      expect(artwork.lookups, 2);
       artwork.pending.complete(
         const AlbumCandidate(
           'a1ed26f7-3f11-4633-a3c7-4a4abfa3271f',
@@ -584,6 +631,97 @@ void main() {
         artworkMetadata(repo.tabs.single)!['release_id'],
         'a1ed26f7-3f11-4633-a3c7-4a4abfa3271f',
       );
+    },
+  );
+
+  testWidgets(
+    'automatically previews best-match artwork for unsaved search results, '
+    'deduplicating identical lookups',
+    (tester) async {
+      final artwork = ImmediateArtworkService();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: DiscoverScreen(
+              service: TabSearchService([provider]),
+              repository: repository,
+              artworkService: artwork,
+            ),
+          ),
+        ),
+      );
+      await tester.enterText(find.byType(TextField), 'Song');
+      await tester.tap(find.text('Search'));
+      await tester.pump();
+      provider.pending.complete([
+        result,
+        const TabSearchResult(
+          externalId: '2',
+          title: 'Song',
+          artist: 'Artist',
+          instrument: InstrumentType.guitar,
+          sourceName: 'Mock',
+          sourceUrl: 'https://example.com/2',
+        ),
+      ]);
+      await tester.pumpAndSettle();
+      final albumArts = tester
+          .widgetList<AlbumArt>(find.byType(AlbumArt))
+          .toList();
+      expect(albumArts, hasLength(2));
+      for (final art in albumArts) {
+        expect(art.tab.artwork, isNotNull);
+      }
+      // Both results share the same artist/title, so only one lookup (and
+      // one cover download) happens even though two cards show the artwork.
+      expect(artwork.lookups, ['Artist|Song']);
+    },
+  );
+
+  testWidgets(
+    'saved or manually selected artwork takes precedence over the automatic '
+    'preview, and is never looked up again',
+    (tester) async {
+      repository.tabs.add(
+        SavedTab(
+          id: 1,
+          title: 'Song',
+          artist: 'Artist',
+          source: 'Mock',
+          sourceId: '1',
+          sourceUrl: result.sourceUrl,
+          instrument: InstrumentType.guitar,
+          stringCount: 2,
+          tuning: const ['E', 'A'],
+          asciiTab: 'E|-0-',
+          artwork: jsonEncode({
+            'release_id': 'manual',
+            'local_path': '/manual/cover.png',
+          }),
+        ),
+      );
+      final artwork = ImmediateArtworkService();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: DiscoverScreen(
+              service: TabSearchService([provider]),
+              repository: repository,
+              artworkService: artwork,
+            ),
+          ),
+        ),
+      );
+      await tester.enterText(find.byType(TextField), 'Song');
+      await tester.tap(find.text('Search'));
+      await tester.pump();
+      provider.pending.complete([result]);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<AlbumArt>(find.byType(AlbumArt)).tab.artwork,
+        contains('manual'),
+      );
+      expect(artwork.lookups, isEmpty);
     },
   );
 }

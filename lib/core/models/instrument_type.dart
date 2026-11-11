@@ -41,4 +41,14 @@ enum TabType {
 }
 
 /// Construction of the instrument, independent of guitar or bass.
-enum InstrumentClassification { acoustic, electric, other }
+enum InstrumentClassification {
+  acoustic,
+  electric,
+  other;
+
+  String get label => switch (this) {
+    acoustic => 'Acoustic',
+    electric => 'Electric',
+    other => 'Other',
+  };
+}

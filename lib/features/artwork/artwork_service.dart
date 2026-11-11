@@ -455,29 +455,8 @@ class ArtworkService {
       final albums = await automaticCandidates(tab.artist, tab.title);
       for (final album in albums) {
         if ((_versions[id] ?? 0) != version) return;
-        if ((_missingCovers[album.id] ?? Duration.zero) > _cacheClock.elapsed) {
-          continue;
-        }
-        String metadata;
-        try {
-          metadata = await select(album);
-        } on FormatException {
-          // A malformed cover should not prevent trying another release.
-          continue;
-        } on ArtworkLookupException catch (error) {
-          if (error.message == 'Cover artwork is unavailable.') continue;
-          rethrow;
-        }
-        final parsed = jsonDecode(metadata);
-        if (parsed is! Map || parsed['local_path'] is! String) {
-          if (_missingCovers.length >= 100) {
-            _missingCovers.remove(_missingCovers.keys.first);
-          }
-          _missingCovers[album.id] =
-              _cacheClock.elapsed + const Duration(minutes: 5);
-          continue;
-        }
-        _missingCovers.remove(album.id);
+        final metadata = await _tryCover(album);
+        if (metadata == null) continue;
         await withTabLock(id, () async {
           if ((_versions[id] ?? 0) != version) return;
           await (repository as AutomaticArtworkRepository)
@@ -493,6 +472,46 @@ class ArtworkService {
     } catch (_) {
       // Connectivity, rate limits, and cache failures never block saved tabs.
     }
+  }
+
+  /// Finds the best ranked album with a usable Cover Art Archive image,
+  /// trying candidates in order until one succeeds. Shared by automatic
+  /// save/import artwork assignment and by search-result artwork previews,
+  /// so a result already looked up during search is not re-fetched when the
+  /// song is saved.
+  Future<String?> bestMatchArtwork(String artist, String title) async {
+    for (final album in await automaticCandidates(artist, title)) {
+      final metadata = await _tryCover(album);
+      if (metadata != null) return metadata;
+    }
+    return null;
+  }
+
+  Future<String?> _tryCover(AlbumCandidate album) async {
+    if ((_missingCovers[album.id] ?? Duration.zero) > _cacheClock.elapsed) {
+      return null;
+    }
+    String metadata;
+    try {
+      metadata = await select(album);
+    } on FormatException {
+      // A malformed cover should not prevent trying another release.
+      return null;
+    } on ArtworkLookupException catch (error) {
+      if (error.message == 'Cover artwork is unavailable.') return null;
+      rethrow;
+    }
+    final parsed = jsonDecode(metadata);
+    if (parsed is! Map || parsed['local_path'] is! String) {
+      if (_missingCovers.length >= 100) {
+        _missingCovers.remove(_missingCovers.keys.first);
+      }
+      _missingCovers[album.id] =
+          _cacheClock.elapsed + const Duration(minutes: 5);
+      return null;
+    }
+    _missingCovers.remove(album.id);
+    return metadata;
   }
 
   /// CAA may publish HTTP archive links; only approved hosts are upgraded before use.

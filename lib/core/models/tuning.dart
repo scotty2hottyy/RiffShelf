@@ -104,3 +104,91 @@ abstract final class TunerPresets {
     bassFiveString,
   ];
 }
+
+/// Human-friendly names for widely used guitar/bass tunings, used to keep
+/// compact UI surfaces (such as Library cards) from showing a raw list of
+/// string pitches. Matching is by pitch class only, so it recognizes a
+/// tuning regardless of octave digits (e.g. "E2") or enharmonic spelling
+/// (e.g. "Eb" vs "D#").
+abstract final class CommonTuningNames {
+  /// Shown when no recognized preset matches the saved tuning notes.
+  static const fallback = 'Custom Tuning';
+
+  static const _guitarPresets = {
+    'Standard': ['E', 'A', 'D', 'G', 'B', 'E'],
+    'Drop D': ['D', 'A', 'D', 'G', 'B', 'E'],
+    'Half-Step Down': ['D#', 'G#', 'C#', 'F#', 'A#', 'D#'],
+    'D Standard': ['D', 'G', 'C', 'F', 'A', 'D'],
+    'Drop C': ['C', 'G', 'C', 'F', 'A', 'D'],
+    'DADGAD': ['D', 'A', 'D', 'G', 'A', 'D'],
+    'Open G': ['D', 'G', 'D', 'G', 'B', 'D'],
+  };
+  static const _bassPresets = {
+    'Standard': ['E', 'A', 'D', 'G'],
+    'Drop D': ['D', 'A', 'D', 'G'],
+    'Half-Step Down': ['D#', 'G#', 'C#', 'F#'],
+    'D Standard': ['D', 'G', 'C', 'F'],
+  };
+
+  static const _pitchClasses = {
+    'C': 0,
+    'B#': 0,
+    'C#': 1,
+    'DB': 1,
+    'D': 2,
+    'D#': 3,
+    'EB': 3,
+    'E': 4,
+    'FB': 4,
+    'F': 5,
+    'E#': 5,
+    'F#': 6,
+    'GB': 6,
+    'G': 7,
+    'G#': 8,
+    'AB': 8,
+    'A': 9,
+    'A#': 10,
+    'BB': 10,
+    'B': 11,
+    'CB': 11,
+  };
+  static final _notePattern = RegExp(r'^([A-Ga-g])([#Bb])?');
+
+  static int? _pitchClass(String note) {
+    final match = _notePattern.firstMatch(note.trim());
+    if (match == null) return null;
+    final letter = match.group(1)!.toUpperCase();
+    final accidental = match.group(2)?.toUpperCase();
+    return _pitchClasses[accidental == null ? letter : '$letter$accidental'];
+  }
+
+  static List<int>? _signature(List<String> notes) {
+    final classes = <int>[];
+    for (final note in notes) {
+      final value = _pitchClass(note);
+      if (value == null) return null;
+      classes.add(value);
+    }
+    return classes;
+  }
+
+  /// Returns the common name for [notes] (low to high), checked against the
+  /// presets for [instrument]. Unknown placeholders (e.g. "?") or a tuning
+  /// that does not match a recognized preset return [fallback].
+  static String of(List<String> notes, InstrumentType instrument) {
+    final signature = _signature(notes);
+    if (signature == null) return fallback;
+    final presetSets = switch (instrument) {
+      InstrumentType.guitar => [_guitarPresets],
+      InstrumentType.bass => [_bassPresets],
+      InstrumentType.other => [_guitarPresets, _bassPresets],
+    };
+    for (final presets in presetSets) {
+      for (final entry in presets.entries) {
+        if (listEquals(signature, _signature(entry.value))) return entry.key;
+      }
+    }
+    return fallback;
+  }
+}

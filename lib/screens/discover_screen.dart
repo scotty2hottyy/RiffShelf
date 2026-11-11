@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../core/database/sqlite_tab_repository.dart';
@@ -37,6 +39,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
             : BackendTabSearchClient(baseUrl: apiBaseUrl),
       );
   late final repository = widget.repository ?? SqliteTabRepository.local();
+  late final artworkService = widget.artworkService ?? ArtworkService.shared;
   final query = TextEditingController();
   InstrumentType? instrument;
   CombinedSearchResponse? response;
@@ -46,12 +49,72 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   int generation = 0;
   List<SavedTab> savedTabs = const [];
 
+  /// Best-match artwork found automatically while a result has not yet been
+  /// saved, keyed by lowercased "artist|title". Manual selection and any
+  /// artwork already persisted on a saved tab always take precedence over
+  /// this preview cache; see [artworkFor].
+  final _previewArtwork = <String, String>{};
+  final _previewInFlight = <String>{};
+
+  static String _previewKey(String artist, String title) =>
+      '${artist.trim().toLowerCase()}|${title.trim().toLowerCase()}';
+
   Future<void> refreshArtwork() async {
     try {
       final tabs = await repository.findTabs();
       if (mounted) setState(() => savedTabs = tabs);
     } catch (_) {
       // Artwork is optional; a storage failure must not block discovery.
+    }
+  }
+
+  /// Looks up best-match artwork for search results that are not yet saved,
+  /// reusing the shared MusicBrainz ranking and Cover Art Archive lookup so
+  /// no extra requests or downloads happen beyond the existing automatic
+  /// matching already used when a tab is saved or imported.
+  void _schedulePreviewArtwork(
+    List<TabSearchResult> results,
+    int searchGeneration,
+  ) {
+    for (final result in results) {
+      if (!ArtworkService.validMetadata(result.artist) ||
+          !ArtworkService.validMetadata(result.title)) {
+        continue;
+      }
+      final key = _previewKey(result.artist, result.title);
+      if (_previewArtwork.containsKey(key) || _previewInFlight.contains(key)) {
+        continue;
+      }
+      final alreadySaved = savedTabs.any(
+        (tab) =>
+            tab.source == result.sourceName &&
+            tab.sourceId == result.externalId &&
+            tab.artwork != null,
+      );
+      if (alreadySaved) continue;
+      _previewInFlight.add(key);
+      unawaited(
+        _loadPreviewArtwork(result.artist, result.title, key, searchGeneration),
+      );
+    }
+  }
+
+  Future<void> _loadPreviewArtwork(
+    String artist,
+    String title,
+    String key,
+    int searchGeneration,
+  ) async {
+    try {
+      final metadata = await artworkService.bestMatchArtwork(artist, title);
+      if (metadata == null || !mounted || searchGeneration != generation) {
+        return;
+      }
+      setState(() => _previewArtwork[key] = metadata);
+    } catch (_) {
+      // A preview is optional; it must never disrupt search results.
+    } finally {
+      _previewInFlight.remove(key);
     }
   }
 
@@ -76,6 +139,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
       instrument: result.instrument,
       stringCount: 1,
       tuning: const [],
+      artwork: _previewArtwork[_previewKey(result.artist, result.title)],
     );
   }
 
@@ -122,6 +186,9 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
             .join('\n');
       }
     });
+    if (result.results.isNotEmpty) {
+      _schedulePreviewArtwork(result.results, current);
+    }
   }
 
   Future<void> openResult(TabSearchResult result) async {
