@@ -23,7 +23,7 @@ class PracticePreparationScreen extends StatelessWidget {
     }
     return TuningPreset(
       name: 'Arrangement tuning',
-      instrument: tab.instrument,
+      instrument: TunerInstrument.fromTabInstrument(tab.instrument),
       notes: tab.tuning,
     );
   }

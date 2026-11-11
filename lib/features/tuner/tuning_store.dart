@@ -2,25 +2,28 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../core/models/instrument_type.dart';
 import '../../core/models/tuning.dart';
 import 'pitch_detector.dart';
 
 /// The microphone detector supports approximately A0 through B5.
 String? tuningValidationError(
   String name,
-  InstrumentType instrument,
+  TunerInstrument instrument,
   List<String> notes,
 ) {
   if (name.trim().isEmpty || name.trim().length > 40) {
     return 'Enter a name of 1–40 characters.';
   }
   final validCount = switch (instrument) {
-    InstrumentType.guitar => notes.length >= 6 && notes.length <= 12,
-    InstrumentType.bass => notes.length >= 4 && notes.length <= 6,
-    InstrumentType.other => false,
+    TunerInstrument.guitar => notes.length >= 6 && notes.length <= 12,
+    TunerInstrument.bass => notes.length >= 4 && notes.length <= 6,
+    _ => notes.length == 1,
   };
-  if (!validCount) return 'Use 6–12 guitar strings or 4–6 bass strings.';
+  if (!validCount) {
+    return instrument.hasStrings
+        ? 'Use 6–12 guitar strings or 4–6 bass strings.'
+        : 'Enter a single reference note.';
+  }
   for (final note in notes) {
     final normalized = note.trim();
     final midi = midiFromNoteName(normalized);
@@ -58,7 +61,9 @@ class CustomTuning {
         !rawNotes.every((note) => note is String)) {
       return null;
     }
-    final instrument = InstrumentType.fromJson(instrumentName);
+    final instrument = TunerInstrument.fromJson(instrumentName);
+    // Custom tunings are only supported for stringed instruments.
+    if (!instrument.hasStrings) return null;
     final notes = rawNotes.cast<String>();
     if (tuningValidationError(name, instrument, notes) != null) return null;
     return CustomTuning(
