@@ -6,6 +6,9 @@ import '../../core/models/saved_tab.dart';
 import '../../core/models/tab_structure.dart';
 import 'practice_timeline.dart';
 
+const _minZoom = 0.6;
+const _maxZoom = 1.8;
+
 /// Full-screen right-to-left scrolling practice mode: notes approach a fixed
 /// playhead from the right (future) and drift past it to the left (already
 /// played), while strings are laid out vertically - a 2D timeline of the tab.
@@ -396,7 +399,11 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
                           onToggleMetronome: _toggleMetronome,
                           onSpeedChanged: _onSpeedChanged,
                           onScaleChanged: (value) =>
-                              setState(() => _scale = value),
+                              // Slider endpoint arithmetic can slightly exceed
+                              // its bounds (e.g. 1.8000000000000003).
+                              setState(
+                                () => _scale = value.clamp(_minZoom, _maxZoom),
+                              ),
                         ),
                       ],
                     ),
@@ -914,8 +921,8 @@ class _PracticeControls extends StatelessWidget {
                     value: scale,
                     semanticFormatterCallback: (value) =>
                         'Zoom ${(value * 100).round()}%',
-                    min: 0.6,
-                    max: 1.8,
+                    min: _minZoom,
+                    max: _maxZoom,
                     onChanged: onScaleChanged,
                   ),
                 ),
