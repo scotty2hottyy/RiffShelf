@@ -88,9 +88,11 @@ class NoteMatcher {
 
   /// Restart matching, including release gating. Do not call this simply to
   /// request the next repeated note: sustained-note protection must survive it.
-  void reset() {
+  /// Set [preserveSustain] at automatic advancement/loop boundaries to discard
+  /// partial evidence without allowing a held pitch to confirm another note.
+  void reset({bool preserveSustain = false}) {
     _expectedPitch = null;
-    _latchedPitch = null;
+    if (!preserveSustain) _latchedPitch = null;
     _releaseCount = 0;
     _clearEvidence();
   }

@@ -233,6 +233,23 @@ void main() {
     confirm(69);
   });
 
+  test(
+    'evidence-only reset preserves sustain gating and clears partial evidence',
+    () {
+      observe(pitch(69));
+      observe(pitch(69));
+      matcher.reset(preserveSustain: true);
+      confirm(69);
+      matcher.reset(preserveSustain: true);
+      for (var i = 0; i < 5; i++) {
+        expect(observe(pitch(69)).status, NoteMatchStatus.insufficientEvidence);
+      }
+      observe(null);
+      observe(null);
+      confirm(69);
+    },
+  );
+
   test('invalid configurations are rejected at runtime', () {
     for (final value in [0.0, -1.0, 51.0, double.nan, double.infinity]) {
       expect(() => NoteMatcher(toleranceCents: value), throwsArgumentError);
