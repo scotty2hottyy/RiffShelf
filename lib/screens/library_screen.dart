@@ -2,7 +2,7 @@ import 'package:file_picker/file_picker.dart';
 
 import '../features/artwork/artwork_service.dart';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../core/database/sqlite_tab_repository.dart';
 import '../core/database/tab_repository.dart';
