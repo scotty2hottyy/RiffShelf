@@ -1,6 +1,7 @@
 import '../../core/models/instrument_type.dart';
 import '../../core/models/saved_tab.dart';
 import '../../core/models/tab_structure.dart';
+import '../tuner/pitch_detector.dart' show midiFromNoteName;
 
 /// A single note normalized onto the tab's absolute practice timeline, in
 /// quarter-note beats measured from the start of the tab. Unlike the raw
@@ -14,6 +15,7 @@ class TimedNoteEvent {
     required this.fret,
     required this.measureNumber,
     this.technique,
+    this.expectedMidiPitch,
   });
 
   final double startBeat;
@@ -22,6 +24,10 @@ class TimedNoteEvent {
   final int fret;
   final int measureNumber;
   final String? technique;
+
+  /// Source MIDI pitch, or an unambiguous tuning/fret fallback. Null does not
+  /// affect ordinary timed practice. Source pitch is never capo-adjusted here.
+  final int? expectedMidiPitch;
 
   double get endBeat => startBeat + durationBeats;
 }
@@ -97,6 +103,7 @@ class PracticeTimeline {
             fret: note.fret,
             measureNumber: measure.number,
             technique: note.technique,
+            expectedMidiPitch: _expectedPitch(tab, note),
           );
           final existingIndex = indexByKey[key];
           if (existingIndex != null) {
@@ -141,6 +148,20 @@ class PracticeTimeline {
 
   /// Whether the source can safely drive timed playback.
   final bool hasReliableTiming;
+
+  static int? _expectedPitch(SavedTab tab, TabNote note) {
+    if (note.midiPitch != null) return note.midiPitch;
+    // Importers retain capo separately, and the model does not say whether
+    // tuning is already transposed. Do not guess a missing pitch with a capo.
+    if (tab.capo != 0 || tab.tuning.length != tab.stringCount) return null;
+    // Tuning is low-to-high; tablature string 1 is the highest string.
+    final openPitch = midiFromNoteName(
+      tab.tuning[tab.stringCount - note.stringNumber],
+    );
+    if (openPitch == null || openPitch < 0 || openPitch > 127) return null;
+    final pitch = openPitch + note.fret;
+    return pitch >= 0 && pitch <= 127 ? pitch : null;
+  }
 
   static double? _measureLengthBeats(TabMeasure measure) {
     if (measure.numerator <= 0 || measure.denominator <= 0) return null;
