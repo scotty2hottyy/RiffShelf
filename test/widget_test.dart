@@ -4,7 +4,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:riffshelf/app.dart';
 import 'package:riffshelf/core/theme_provider.dart';
+import 'package:riffshelf/features/tuner/audio_input.dart';
+import 'package:riffshelf/navigation/main_navigation.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+import 'tuner_test.dart' show FakeInput;
 
 void main() {
   setUpAll(() {
@@ -75,6 +79,47 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Import Tab'), findsOneWidget);
     expect(find.text('Song or artist', skipOffstage: false), findsOneWidget);
+  });
+
+  testWidgets('stops microphone capture when leaving the Tuner tab', (
+    tester,
+  ) async {
+    Finder destination(String label) => find.byWidgetPredicate(
+      (widget) => widget is NavigationDestination && widget.label == label,
+    );
+
+    final input = FakeInput(MicrophoneStatus.available);
+    await tester.pumpWidget(
+      ChangeNotifierProvider(
+        create: (_) => ThemeProvider(),
+        child: MaterialApp(
+          home: MainNavigation(tunerInputFactory: () => input),
+        ),
+      ),
+    );
+
+    await tester.tap(destination('Tuner'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Start tuning'));
+    await tester.tap(find.text('Start tuning'));
+    await tester.pumpAndSettle();
+    expect(input.starts, 1);
+    expect(input.stops, 0);
+
+    await tester.tap(destination('Discover'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      0,
+    );
+    expect(input.stops, 1);
+    expect(input.controller.hasListener, isFalse);
+    expect(input.disposals, 0);
+
+    await tester.tap(destination('Tuner'));
+    await tester.pumpAndSettle();
+    expect(find.text('Start tuning'), findsOneWidget);
+    expect(input.starts, 1);
   });
 
   for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {

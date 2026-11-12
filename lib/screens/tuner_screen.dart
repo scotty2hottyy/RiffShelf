@@ -11,10 +11,13 @@ import '../features/tuner/tuning_store.dart';
 class TunerScreen extends StatefulWidget {
   const TunerScreen({
     super.key,
+    this.isSelected = true,
     this.inputFactory,
     this.preset,
     this.settingsStore,
   });
+
+  final bool isSelected;
 
   /// A fixed arrangement tuning; null keeps the standalone preset picker.
   final TuningPreset? preset;
@@ -141,6 +144,16 @@ class _TunerScreenState extends State<TunerScreen> with WidgetsBindingObserver {
   }
 
   @override
+  void didUpdateWidget(covariant TunerScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isSelected &&
+        !widget.isSelected &&
+        _controller.status != TunerStatus.idle) {
+      _controller.stop();
+    }
+  }
+
+  @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) _controller.stop();
   }
@@ -154,8 +167,9 @@ class _TunerScreenState extends State<TunerScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    // The navigation keeps this screen alive while hidden; release the mic then.
-    if (!TickerMode.valuesOf(context).enabled &&
+    // A route can also hide the tuner while keeping it mounted.
+    if (widget.isSelected &&
+        !TickerMode.valuesOf(context).enabled &&
         _controller.status != TunerStatus.idle) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _controller.stop());
     }

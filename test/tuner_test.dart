@@ -19,7 +19,7 @@ import 'package:shared_preferences_platform_interface/shared_preferences_async_p
 class FakeInput implements TunerAudioInput {
   FakeInput(this.status);
   final MicrophoneStatus status;
-  final controller = StreamController<Uint8List>();
+  final controller = StreamController<Uint8List>(onCancel: () async {});
   int preparations = 0;
   int starts = 0;
   int stops = 0;
