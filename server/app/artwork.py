@@ -10,10 +10,15 @@ def artwork_url(value):
     if not isinstance(value, str):
         raise ValueError("Invalid artwork URL")
     url = urlsplit(value)
-    if (url.scheme not in {"http", "https"} or url.hostname not in
-            {"coverartarchive.org", "archive.org"} and
-            not (url.hostname or "").endswith(".archive.org") or
-            url.username or url.password or url.port not in (None, 80, 443) or url.fragment):
+    # Validate scheme
+    if url.scheme not in {"http", "https"}:
+        raise ValueError("Untrusted artwork URL")
+    # Validate hostname against allowlist
+    if url.hostname not in {"coverartarchive.org", "archive.org"} and \
+            not (url.hostname or "").endswith(".archive.org"):
+        raise ValueError("Untrusted artwork URL")
+    # Reject URLs with authentication, non-standard ports, or fragments
+    if url.username or url.password or url.port not in (None, 80, 443) or url.fragment:
         raise ValueError("Untrusted artwork URL")
     return urlunsplit(("https", url.hostname, url.path, url.query, ""))
 
