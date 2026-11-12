@@ -75,7 +75,7 @@ class MemoryRepo implements TabRepository {
     TabFilter filter = const TabFilter(),
   ]) async => [tab];
   @override
-  Future<Set<String>> allTags() async => {};
+  Future<Set<String>> allTags() async => <String>{};
   @override
   Future<void> delete(int id) async {}
   @override
@@ -1159,7 +1159,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(Image), findsOneWidget);
       expect(find.byIcon(Icons.album_outlined), findsNothing);
-      debugDefaultTargetPlatformOverride = null;
     });
   }
 
