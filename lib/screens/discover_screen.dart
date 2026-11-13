@@ -228,6 +228,11 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
         tab = await service.fetch(result, track);
       }
       if (!mounted) return;
+      final previewArtwork =
+          _previewArtwork[_previewKey(result.artist, result.title)];
+      if (tab.artwork == null && previewArtwork != null) {
+        tab = tab.copyWith(artwork: previewArtwork);
+      }
       setState(() => loading = false);
       await Navigator.push(
         context,
