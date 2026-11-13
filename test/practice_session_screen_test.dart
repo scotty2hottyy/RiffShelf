@@ -74,7 +74,7 @@ void main() {
     );
     await tester.pumpWidget(MaterialApp(home: PracticeSessionScreen(tab: tab)));
     expect(find.textContaining('Approximate timing'), findsOneWidget);
-    expect(find.byTooltip('Note Following'), findsOneWidget);
+    expect(find.text('Note by note'), findsOneWidget);
     final play = find.byKey(const ValueKey('practice-play-pause'));
     expect(find.byKey(const ValueKey('practice-track')), findsOneWidget);
     await tester.ensureVisible(play);
@@ -100,7 +100,7 @@ void main() {
     await tester.pumpWidget(
       const MaterialApp(home: PracticeSessionScreen(tab: tab)),
     );
-    expect(find.byTooltip('Note Following'), findsOneWidget);
+    expect(find.text('Note by note'), findsOneWidget);
     expect(find.text('Measure 1 of 2'), findsOneWidget);
     final play = find.byKey(const ValueKey('practice-play-pause'));
     await tester.ensureVisible(play);

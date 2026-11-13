@@ -163,7 +163,7 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
       expect(find.text('Measure 2 of 2'), findsOneWidget);
       expect(audio.starts, 0);
-      await tester.tap(find.byTooltip('Note Following'));
+      await tester.tap(find.text('Note by note'));
       await tester.pump();
       final restart = find.byTooltip('Restart');
       await tester.ensureVisible(restart);
@@ -199,7 +199,7 @@ void main() {
     (tester) async {
       final audio = FakeAudio();
       await showPractice(tester, audio);
-      await tester.tap(find.byTooltip('Note Following'));
+      await tester.tap(find.text('Note by note'));
       await tester.pump();
       await tapPlay(tester);
       await frames(tester, audio, 440, 2);
@@ -240,7 +240,7 @@ void main() {
   ) async {
     final audio = FakeAudio();
     await showPractice(tester, audio, chord: true);
-    await tester.tap(find.byTooltip('Note Following'));
+    await tester.tap(find.text('Note by note'));
     await tester.pump();
     expect(find.text('Measure 2 of 2'), findsOneWidget);
     expect(
@@ -272,7 +272,7 @@ void main() {
     testWidgets('shows $availability without advancing', (tester) async {
       final audio = FakeAudio(availability);
       await showPractice(tester, audio);
-      await tester.tap(find.byTooltip('Note Following'));
+      await tester.tap(find.text('Note by note'));
       await tester.pump();
       await tapPlay(tester);
       expect(find.textContaining(message), findsOneWidget);
@@ -289,11 +289,11 @@ void main() {
     final gate = Completer<void>();
     final audio = FakeAudio()..startGate = gate.future;
     await showPractice(tester, audio);
-    await tester.tap(find.byTooltip('Note Following'));
+    await tester.tap(find.text('Note by note'));
     await tester.pump();
     await tapPlay(tester);
     expect(audio.starts, 1);
-    await tester.tap(find.byTooltip('Note Following'));
+    await tester.tap(find.text('Timed scrolling'));
     await tester.pump();
     gate.complete();
     await tester.pump();
@@ -317,7 +317,7 @@ void main() {
 
     final audio = FakeAudio();
     await showPractice(tester, audio);
-    await tester.tap(find.byTooltip('Note Following'));
+    await tester.tap(find.text('Note by note'));
     await tester.pump();
     await tapPlay(tester);
     expect(tunerAudio.stops, 1);

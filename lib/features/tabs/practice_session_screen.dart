@@ -435,19 +435,37 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
                   child: IntrinsicHeight(
                     child: Column(
                       children: [
-                        Semantics(
-                          toggled: _noteFollowing,
-                          child: Tooltip(
-                            message: 'Note Following',
-                            child: TextButton(
-                              onPressed: () =>
-                                  _setNoteFollowing(!_noteFollowing),
-                              child: Text(
-                                _noteFollowing
-                                    ? 'Note by note ✓'
-                                    : 'Note by note',
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                          child: Column(
+                            children: [
+                              const Text('Practice mode'),
+                              Wrap(
+                                alignment: WrapAlignment.center,
+                                spacing: 8,
+                                runSpacing: 4,
+                                children: [
+                                  ChoiceChip(
+                                    label: const Text('Timed scrolling'),
+                                    selected: !_noteFollowing,
+                                    onSelected: (selected) {
+                                      if (selected && _noteFollowing) {
+                                        _setNoteFollowing(false);
+                                      }
+                                    },
+                                  ),
+                                  ChoiceChip(
+                                    label: const Text('Note by note'),
+                                    selected: _noteFollowing,
+                                    onSelected: (selected) {
+                                      if (selected && !_noteFollowing) {
+                                        _setNoteFollowing(true);
+                                      }
+                                    },
+                                  ),
+                                ],
                               ),
-                            ),
+                            ],
                           ),
                         ),
                         if (_noteFollowing) _followStatus(),
