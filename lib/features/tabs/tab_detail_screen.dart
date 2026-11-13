@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../core/models/saved_tab.dart';
 import '../../core/database/tab_repository.dart';
@@ -240,7 +240,7 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
       appBar: AppBar(
         title: Text(tab.title),
         actions: [
-          if (tab.hasStructuredContent)
+          if (tab.hasUsableContent)
             IconButton(
               tooltip: 'Practice',
               icon: const Icon(Icons.play_circle_outline),

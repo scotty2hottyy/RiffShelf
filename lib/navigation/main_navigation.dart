@@ -1,5 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
+import '../features/tuner/audio_input.dart';
 import '../screens/discover_screen.dart';
 import '../screens/library_screen.dart';
 import '../screens/practice_screen.dart';
@@ -7,7 +8,9 @@ import '../screens/settings_screen.dart';
 import '../screens/tuner_screen.dart';
 
 class MainNavigation extends StatefulWidget {
-  const MainNavigation({super.key});
+  const MainNavigation({super.key, this.tunerInputFactory});
+
+  final TunerAudioInput Function()? tunerInputFactory;
 
   @override
   State<MainNavigation> createState() => _MainNavigationState();
@@ -73,7 +76,16 @@ class _MainNavigationState extends State<MainNavigation> with RestorationMixin {
       appBar: AppBar(titleSpacing: 20, title: const _BrandHeader()),
       body: IndexedStack(
         index: _selectedIndex.value,
-        children: [for (final destination in _destinations) destination.screen],
+        children: [
+          for (final (index, destination) in _destinations.indexed)
+            if (destination.screen is TunerScreen)
+              TunerScreen(
+                isSelected: index == _selectedIndex.value,
+                inputFactory: widget.tunerInputFactory,
+              )
+            else
+              destination.screen,
+        ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex.value,

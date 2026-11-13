@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../core/database/tab_repository.dart';
 import '../../core/models/instrument_type.dart';

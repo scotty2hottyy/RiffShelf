@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>RiffShelf uses the microphone to tune your instrument.</string>
+	<string>RiffShelf uses the microphone to tune your instrument and follow the notes you play in practice.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

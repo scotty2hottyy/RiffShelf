@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:riffshelf/core/theme_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:riffshelf/core/models/tuning.dart';
@@ -18,7 +18,7 @@ import 'package:shared_preferences_platform_interface/shared_preferences_async_p
 class FakeInput implements TunerAudioInput {
   FakeInput(this.status);
   final MicrophoneStatus status;
-  final controller = StreamController<Uint8List>();
+  final controller = StreamController<Uint8List>(onCancel: () async {});
   int preparations = 0;
   int starts = 0;
   int stops = 0;

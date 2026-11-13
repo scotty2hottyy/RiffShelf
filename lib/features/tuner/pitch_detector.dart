@@ -74,10 +74,13 @@ double centsBetween(double frequency, double target) =>
 
 /// YIN pitch detector working on mono samples in the range [-1, 1].
 class PitchDetector {
+  static const defaultMinFrequency = 25.0;
+  static const defaultMaxFrequency = 1000.0;
+
   PitchDetector({
     required this.sampleRate,
-    this.minFrequency = 25,
-    this.maxFrequency = 1000,
+    this.minFrequency = defaultMinFrequency,
+    this.maxFrequency = defaultMaxFrequency,
     this.threshold = 0.15,
     this.minRms = 0.01,
   });

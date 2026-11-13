@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../core/models/saved_tab.dart';
 import '../../core/models/tuning.dart';
@@ -43,10 +43,8 @@ class PracticePreparationScreen extends StatelessWidget {
           const SizedBox(height: 16),
           Text('Tuning, low to high: ${tab.tuning.join(' ')}'),
           const SizedBox(height: 16),
-          if (!tab.hasStructuredContent)
-            const Text(
-              'This tab can be viewed, but needs structured notes for practice.',
-            )
+          if (!tab.hasUsableContent)
+            const Text('This tab has no playable notes.')
           else ...[
             if (tuning == null)
               const Text(

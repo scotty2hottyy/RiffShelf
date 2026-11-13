@@ -6,6 +6,9 @@ import 'package:riffshelf/core/models/saved_tab.dart';
 import 'package:riffshelf/core/models/tab_structure.dart';
 import 'package:riffshelf/features/import/tab_import_service.dart';
 import 'package:riffshelf/features/tabs/practice_timeline.dart';
+import 'package:riffshelf/features/search/data/songsterr_structured_client.dart';
+
+import 'support/songsterr_fixtures.dart';
 
 void main() {
   test('GP3, GP4 and GP5 imported chords retain authored timing', () {
@@ -52,6 +55,15 @@ void main() {
         2,
       ], reason: name);
       expect(timeline.events[5].startBeat, 2, reason: name);
+      final sourceNotes = tab.measures
+          .expand((m) => m.beats)
+          .expand((b) => b.notes)
+          .toList();
+      expect(
+        timeline.events.map((e) => e.expectedMidiPitch),
+        sourceNotes.map((n) => n.midiPitch),
+        reason: name,
+      );
     }
   });
 
@@ -74,6 +86,7 @@ void main() {
     List<String> tuning = const ['E', 'A', 'D', 'G', 'B', 'E'],
     InstrumentType instrument = InstrumentType.guitar,
     TabType tabType = TabType.tab,
+    int capo = 0,
   }) => SavedTab(
     title: 'Timeline',
     artist: '',
@@ -83,8 +96,202 @@ void main() {
     stringCount: tuning.length,
     tuning: tuning,
     tabType: tabType,
+    capo: capo,
     measures: measures,
   );
+
+  group('expected MIDI pitch', () {
+    const standard = ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'];
+    SavedTab withNotes(
+      List<TabNote> notes, {
+      List<String> tuning = standard,
+      int capo = 0,
+    }) => tabWithMeasures(
+      [
+        TabMeasure(number: 1, beats: [TabBeat(position: 0, notes: notes)]),
+      ],
+      tuning: tuning,
+      capo: capo,
+    );
+
+    test(
+      'explicit source pitch wins even with unknown tuning or nonzero capo',
+      () {
+        final timeline = PracticeTimeline.fromTab(
+          withNotes(
+            [const TabNote(stringNumber: 1, fret: 3, midiPitch: 72)],
+            tuning: const ['?', '?', '?', '?', '?', '?'],
+            capo: 2,
+          ),
+        );
+        expect(timeline.events.single.expectedMidiPitch, 72);
+        expect(timeline.hasReliableTiming, isTrue);
+      },
+    );
+
+    test('fallback maps highest and lowest strings and applies fret once', () {
+      final timeline = PracticeTimeline.fromTab(
+        withNotes([
+          const TabNote(stringNumber: 6, fret: 5),
+          const TabNote(stringNumber: 1, fret: 0),
+          const TabNote(stringNumber: 2, fret: 3),
+        ]),
+      );
+      expect(timeline.events.map((e) => e.stringNumber), [1, 2, 6]);
+      expect(timeline.events.map((e) => e.expectedMidiPitch), [64, 62, 45]);
+      expect(timeline.events.map((e) => e.startBeat), [0, 0, 0]);
+    });
+
+    test(
+      'alternate and extended tunings preserve octave and enharmonic spelling',
+      () {
+        for (final (tuning, highest, lowest) in [
+          (['D2', 'A2', 'D3', 'G3', 'A3', 'D4'], 62, 38),
+          (['B0', 'E1', 'A1', 'D2', 'G2'], 43, 23),
+          (['Eb1', 'Ab1', 'Db2', 'Gb2'], 42, 27),
+          (['B1', 'E2', 'A2', 'D3', 'G3', 'B3', 'E4'], 64, 35),
+        ]) {
+          final timeline = PracticeTimeline.fromTab(
+            withNotes([
+              const TabNote(stringNumber: 1, fret: 0),
+              TabNote(stringNumber: tuning.length, fret: 0),
+            ], tuning: tuning),
+          );
+          expect(timeline.events.map((e) => e.expectedMidiPitch), [
+            highest,
+            lowest,
+          ]);
+        }
+      },
+    );
+
+    test(
+      'missing octave, unknown note and out-of-range fallback stay playable',
+      () {
+        for (final name in ['E', '?', 'H2', 'G#9', 'C-2']) {
+          final timeline = PracticeTimeline.fromTab(
+            withNotes(
+              [const TabNote(stringNumber: 1, fret: 0)],
+              tuning: [name],
+            ),
+          );
+          expect(
+            timeline.events.single.expectedMidiPitch,
+            isNull,
+            reason: name,
+          );
+          expect(timeline.hasReliableTiming, isTrue, reason: name);
+          expect(timeline.totalBeats, 4);
+        }
+        final tooHigh = PracticeTimeline.fromTab(
+          withNotes([const TabNote(stringNumber: 1, fret: 100)]),
+        );
+        expect(tooHigh.events.single.expectedMidiPitch, isNull);
+        expect(tooHigh.hasReliableTiming, isTrue);
+      },
+    );
+
+    test('mismatched tuning count still falls back instead of indexing missing strings', () {
+      final tab = SavedTab(
+        title: 'Invalid tuning',
+        artist: '',
+        source: '',
+        sourceUrl: '',
+        instrument: InstrumentType.guitar,
+        stringCount: 6,
+        tuning: const ['E2'],
+        measures: const [
+          TabMeasure(
+            number: 1,
+            beats: [
+              TabBeat(position: 0, notes: [TabNote(stringNumber: 1, fret: 0)]),
+            ],
+          ),
+        ],
+      );
+      final timeline = PracticeTimeline.fromTab(tab);
+      expect(timeline.hasReliableTiming, isFalse);
+      expect(timeline.events, isEmpty);
+    });
+
+    test('nonzero capo without explicit pitch remains unknown', () {
+      final timeline = PracticeTimeline.fromTab(
+        withNotes([const TabNote(stringNumber: 1, fret: 0)], capo: 2),
+      );
+      expect(timeline.events.single.expectedMidiPitch, isNull);
+      expect(timeline.hasReliableTiming, isTrue);
+    });
+
+    test('mixed known and unknown chord notes keep timing, sorting and last-write deduplication', () {
+      final timeline = PracticeTimeline.fromTab(
+        withNotes(
+          [
+            const TabNote(stringNumber: 3, fret: 0),
+            const TabNote(stringNumber: 1, fret: 0, midiPitch: 70, duration: 2),
+            const TabNote(stringNumber: 2, fret: 1),
+            const TabNote(stringNumber: 1, fret: 5, midiPitch: 69, duration: 3),
+          ],
+          tuning: const ['E2', 'A2', 'D3', '?', 'B3', 'E4'],
+        ),
+      );
+      expect(timeline.events.map((e) => e.stringNumber), [1, 2, 3]);
+      expect(timeline.events.map((e) => e.expectedMidiPitch), [69, 60, null]);
+      expect(timeline.events.map((e) => e.startBeat), [0, 0, 0]);
+      expect(timeline.events.map((e) => e.durationBeats), [3, 1, 1]);
+      expect(timeline.hasReliableTiming, isTrue);
+    });
+
+    test(
+      'Guitar Pro capo import pitch is preserved without transposing again',
+      () {
+        const importer = TabImportService();
+        final document = importer.parseGuitarPro(
+          File('test/fixtures/Chords.gp5').readAsBytesSync(),
+        );
+        document.song.tracks.first.offset = 3;
+        final tab = importer.convertTrack(document, 0, 'Chords.gp5');
+        final source = tab.measures.first.beats.first.notes;
+        final events = PracticeTimeline.fromTab(tab).events.take(source.length);
+        expect(tab.capo, 3);
+        expect(
+          events.map((e) => e.expectedMidiPitch),
+          source.map((n) => n.midiPitch),
+        );
+      },
+    );
+
+    test(
+      'Songsterr capo import pitch is preserved without extra transposition',
+      () {
+        final payload = currentTrackPayload()..['capo'] = 3;
+        final tab = const SongsterrTrackConverter().convert(
+          song: const SongsterrSongData(
+            songId: '19',
+            revisionId: '9115670',
+            image: '',
+            title: 'Song',
+            artist: 'Artist',
+            tracks: [],
+          ),
+          track: SongsterrTrackData(
+            metadata: const SongsterrTrackMetadata(
+              partId: 1,
+              name: 'Guitar',
+              instrument: 'Guitar',
+            ),
+            payload: payload,
+          ),
+          sourceUrl: 'https://www.songsterr.com/a/wsa/song?id=19',
+        );
+        expect(tab.capo, 3);
+        expect(tab.measures.first.beats.first.notes.single.midiPitch, 42);
+        expect(
+          PracticeTimeline.fromTab(tab).events.first.expectedMidiPitch,
+          42,
+        );
+      },
+    );
+  });
 
   test('flattens notes onto an absolute beat timeline across measures', () {
     final tab = tabWithMeasures([

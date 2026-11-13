@@ -1,6 +1,8 @@
 import '../../core/models/instrument_type.dart';
 import '../../core/models/saved_tab.dart';
 import '../../core/models/tab_structure.dart';
+import '../import/ascii_tab_parser.dart';
+import '../tuner/pitch_detector.dart' show midiFromNoteName;
 
 /// A single note normalized onto the tab's absolute practice timeline, in
 /// quarter-note beats measured from the start of the tab. Unlike the raw
@@ -14,6 +16,7 @@ class TimedNoteEvent {
     required this.fret,
     required this.measureNumber,
     this.technique,
+    this.expectedMidiPitch,
   });
 
   final double startBeat;
@@ -22,6 +25,10 @@ class TimedNoteEvent {
   final int fret;
   final int measureNumber;
   final String? technique;
+
+  /// Source MIDI pitch, or an unambiguous tuning/fret fallback. Null does not
+  /// affect ordinary timed practice. Source pitch is never capo-adjusted here.
+  final int? expectedMidiPitch;
 
   double get endBeat => startBeat + durationBeats;
 }
@@ -38,10 +45,64 @@ class MeasureMarker {
 /// can scrub through deterministically, independent of any particular tempo.
 ///
 /// Source tab data (hand-edited, imported, or parsed from ASCII/Guitar Pro)
-/// can be messy. Invalid timing makes the entire timeline unsuitable for
-/// playback; callers can then display static tablature instead of guessing.
+/// can be messy. Invalid timing makes the strict timeline unsuitable for
+/// Note Following. Use [PracticeTimeline.forScrolling] for ordinary practice.
 class PracticeTimeline {
-  factory PracticeTimeline.fromTab(SavedTab tab) {
+  factory PracticeTimeline.fromTab(SavedTab tab) =>
+      PracticeTimeline._build(tab, tab.measures);
+
+  /// Prefer source timing. If it cannot be trusted, keep a separate scrolling
+  /// fallback for scrolling and pitch-based practice.
+  factory PracticeTimeline.forScrolling(SavedTab tab) {
+    final source = PracticeTimeline.fromTab(tab);
+    if (source.hasReliableTiming) return source;
+    final approximate = PracticeTimeline._build(
+      tab,
+      _approximateMeasures(tab.measures),
+      approximate: true,
+    );
+    if (approximate.events.isNotEmpty || !tab.hasTextContent) {
+      return approximate;
+    }
+    return PracticeTimeline._build(
+      tab,
+      AsciiTabParser.approximateMeasures(tab.asciiTab, tab.stringCount),
+      approximate: true,
+    );
+  }
+
+  static List<TabMeasure> _approximateMeasures(List<TabMeasure> source) => [
+    for (final measure in source)
+      TabMeasure(
+        number: measure.number,
+        // Keep measures and source beat order. Divide each measure evenly
+        // across its beats (including rests) when timing cannot be trusted.
+        beats: [
+          for (final (i, beat) in measure.beats.indexed)
+            TabBeat(
+              position: i * 4 / measure.beats.length,
+              duration: 4 / measure.beats.length,
+              isRest: beat.isRest,
+              notes: [
+                for (final note in beat.notes)
+                  if (note.stringNumber > 0 && note.fret >= 0)
+                    TabNote(
+                      stringNumber: note.stringNumber,
+                      fret: note.fret,
+                      midiPitch: note.midiPitch,
+                      technique: note.technique,
+                    ),
+              ],
+            ),
+        ],
+      ),
+  ];
+
+  factory PracticeTimeline._build(
+    SavedTab tab,
+    List<TabMeasure> source, {
+    bool approximate = false,
+  }) {
     final markers = <MeasureMarker>[];
     final events = <TimedNoteEvent>[];
     // Keyed by string + rounded onset beat so exact duplicate note events
@@ -49,12 +110,13 @@ class PracticeTimeline {
     // strings sounding at the same beat - are left untouched.
     final indexByKey = <String, int>{};
     var hasReliableTiming =
-        tab.tabType != TabType.other &&
-        tab.tabType != TabType.chords &&
-        tab.tuning.length == tab.stringCount;
+        approximate ||
+        (tab.tabType != TabType.other &&
+            tab.tabType != TabType.chords &&
+            tab.tuning.length == tab.stringCount);
 
     var cursor = 0.0;
-    for (final measure in tab.measures) {
+    for (final measure in source) {
       final measureLength = _measureLengthBeats(measure);
       if (measureLength == null) {
         hasReliableTiming = false;
@@ -85,7 +147,7 @@ class PracticeTimeline {
               note.fret < 0 ||
               !rawDuration.isFinite ||
               rawDuration <= 0) {
-            hasReliableTiming = false;
+            if (!approximate) hasReliableTiming = false;
             continue;
           }
           final duration = _round(rawDuration);
@@ -97,6 +159,7 @@ class PracticeTimeline {
             fret: note.fret,
             measureNumber: measure.number,
             technique: note.technique,
+            expectedMidiPitch: _expectedPitch(tab, note),
           );
           final existingIndex = indexByKey[key];
           if (existingIndex != null) {
@@ -119,7 +182,7 @@ class PracticeTimeline {
       events: hasReliableTiming ? List.unmodifiable(events) : const [],
       measures: hasReliableTiming ? List.unmodifiable(markers) : const [],
       totalBeats: hasReliableTiming ? cursor : 0,
-      hasReliableTiming: hasReliableTiming && events.isNotEmpty,
+      hasReliableTiming: !approximate && hasReliableTiming && events.isNotEmpty,
     );
   }
 
@@ -141,6 +204,20 @@ class PracticeTimeline {
 
   /// Whether the source can safely drive timed playback.
   final bool hasReliableTiming;
+
+  static int? _expectedPitch(SavedTab tab, TabNote note) {
+    if (note.midiPitch != null) return note.midiPitch;
+    // Importers retain capo separately, and the model does not say whether
+    // tuning is already transposed. Do not guess a missing pitch with a capo.
+    if (tab.capo != 0 || tab.tuning.length != tab.stringCount) return null;
+    // Tuning is low-to-high; tablature string 1 is the highest string.
+    final openPitch = midiFromNoteName(
+      tab.tuning[tab.stringCount - note.stringNumber],
+    );
+    if (openPitch == null || openPitch < 0 || openPitch > 127) return null;
+    final pitch = openPitch + note.fret;
+    return pitch >= 0 && pitch <= 127 ? pitch : null;
+  }
 
   static double? _measureLengthBeats(TabMeasure measure) {
     if (measure.numerator <= 0 || measure.denominator <= 0) return null;

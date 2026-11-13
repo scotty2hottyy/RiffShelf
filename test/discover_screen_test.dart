@@ -6,7 +6,7 @@ import 'package:riffshelf/core/theme_provider.dart';
 import 'package:riffshelf/features/artwork/album_art.dart';
 import 'package:riffshelf/features/artwork/artwork_service.dart';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:riffshelf/core/database/tab_repository.dart';
 import 'package:riffshelf/core/models/instrument_type.dart';
