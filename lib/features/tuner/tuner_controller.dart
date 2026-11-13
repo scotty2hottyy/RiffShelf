@@ -84,6 +84,7 @@ class TunerController extends ChangeNotifier {
   int _sinceAnalysis = 0;
   int _session = 0;
   bool _disposed = false;
+  bool _inputUsed = false;
   double? _candidateFrequency;
   int _candidateFrames = 0;
   int? _selectedStringIndex;
@@ -135,6 +136,7 @@ class TunerController extends ChangeNotifier {
           }
         }
         if (_cancelled(session)) return;
+        _inputUsed = true;
         final availability = await _input.prepare();
         if (_cancelled(session)) return;
         switch (availability) {
@@ -330,14 +332,18 @@ class TunerController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _session++;
-    _serialize(() async {
-      try {
-        await _release();
-      } finally {
-        await _input.dispose();
-        if (_captureOwner == this) _captureOwner = null;
-      }
-    }).catchError((Object _) {});
+    // An unopened input has nothing to release. In particular, don't
+    // initialize a native recorder just to dispose it on route teardown.
+    if (_inputUsed) {
+      _serialize(() async {
+        try {
+          await _release();
+        } finally {
+          await _input.dispose();
+          if (_captureOwner == this) _captureOwner = null;
+        }
+      }).catchError((Object _) {});
+    }
     super.dispose();
   }
 }
