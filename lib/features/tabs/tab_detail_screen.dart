@@ -240,7 +240,7 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
       appBar: AppBar(
         title: Text(tab.title),
         actions: [
-          if (tab.hasStructuredContent)
+          if (tab.hasUsableContent)
             IconButton(
               tooltip: 'Practice',
               icon: const Icon(Icons.play_circle_outline),

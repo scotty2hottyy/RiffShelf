@@ -41,6 +41,7 @@ class TunerReading {
 class TunerController extends ChangeNotifier {
   TunerController({
     required TunerAudioInput input,
+    this.onPitch,
     this._preset = TunerPresets.guitarStandard,
   }) : _input = input,
        _detector = PitchDetector(sampleRate: input.sampleRate) {
@@ -50,6 +51,27 @@ class TunerController extends ChangeNotifier {
   static const _analysisInterval = Duration(milliseconds: 80);
   static const _minimumConfidence = 0.85;
   static const _stableCents = 45.0;
+
+  /// When supplied, emit each detector observation instead of tuner readings.
+  final ValueChanged<PitchResult?>? onPitch;
+
+  // Both tuner routes and practice use this queue. An acquisition cannot
+  // overtake an in-flight stop, disposal, or cancelled startup.
+  static Future<void>? _captureQueue;
+  static TunerController? _captureOwner;
+
+  static Future<void> _serialize(Future<void> Function() action) {
+    final previous = _captureQueue;
+    final operation = previous == null
+        ? Future<void>.microtask(action)
+        : previous.then((_) => action());
+    late final Future<void> tail;
+    tail = operation.catchError((Object _) {}).whenComplete(() {
+      if (identical(_captureQueue, tail)) _captureQueue = null;
+    });
+    _captureQueue = tail;
+    return operation;
+  }
 
   final TunerAudioInput _input;
   final PitchDetector _detector;
@@ -93,75 +115,111 @@ class TunerController extends ChangeNotifier {
     _notify();
   }
 
-  Future<void> start() async {
-    if (_status == TunerStatus.starting || _status == TunerStatus.listening) {
-      return;
+  Future<void> start() {
+    if (_disposed ||
+        _status == TunerStatus.starting ||
+        _status == TunerStatus.listening) {
+      return Future<void>.value();
     }
     final session = ++_session;
     _setStatus(TunerStatus.starting);
-
-    final availability = await _input.prepare();
-    if (_cancelled(session)) return;
-    switch (availability) {
-      case MicrophoneStatus.permissionDenied:
-        return _setStatus(TunerStatus.permissionDenied);
-      case MicrophoneStatus.noMicrophone:
-        return _setStatus(TunerStatus.noMicrophone);
-      case MicrophoneStatus.error:
-        return _setStatus(TunerStatus.error);
-      case MicrophoneStatus.available:
-        break;
-    }
-
-    try {
-      final stream = await _input.start();
-      if (_cancelled(session)) {
-        await _input.stop();
-        return;
-      }
-      _filled = 0;
-      _sinceAnalysis = 0;
-      _carryByte = null;
-      _window.fillRange(0, _window.length, 0);
-      _resetCandidate();
-      _subscription = stream.listen(
-        _onAudio,
-        onError: (_) => _fail(session),
-        onDone: () => _fail(session),
-        cancelOnError: true,
-      );
-      _setStatus(TunerStatus.listening);
-    } catch (_) {
+    return _serialize(() async {
       if (_cancelled(session)) return;
-      // Starting after a successful check usually means the device vanished.
-      _setStatus(TunerStatus.noMicrophone);
-    }
+      try {
+        final previous = _captureOwner;
+        if (previous != null && previous != this) {
+          final previousSession = ++previous._session;
+          await previous._release();
+          if (!previous._cancelled(previousSession)) {
+            previous._setStatus(TunerStatus.idle);
+          }
+        }
+        if (_cancelled(session)) return;
+        final availability = await _input.prepare();
+        if (_cancelled(session)) return;
+        switch (availability) {
+          case MicrophoneStatus.permissionDenied:
+            return _setStatus(TunerStatus.permissionDenied);
+          case MicrophoneStatus.noMicrophone:
+            return _setStatus(TunerStatus.noMicrophone);
+          case MicrophoneStatus.error:
+            return _setStatus(TunerStatus.error);
+          case MicrophoneStatus.available:
+            break;
+        }
+        _captureOwner = this;
+        final stream = await _input.start();
+        if (_cancelled(session)) {
+          await _release();
+          return;
+        }
+        _filled = 0;
+        _sinceAnalysis = 0;
+        _carryByte = null;
+        _window.fillRange(0, _window.length, 0);
+        _resetCandidate();
+        _subscription = stream.listen(
+          (bytes) {
+            if (!_cancelled(session)) _onAudio(bytes);
+          },
+          onError: (Object _) => _fail(session),
+          onDone: () => _fail(session),
+          cancelOnError: true,
+        );
+        _setStatus(TunerStatus.listening);
+      } catch (_) {
+        try {
+          await _release();
+        } catch (_) {
+          // Retain ownership on a failed stop; the next acquire must retry it.
+        }
+        if (!_cancelled(session)) _setStatus(TunerStatus.error);
+      }
+    });
   }
 
-  Future<void> stop() async {
-    _session++;
-    await _teardown();
+  Future<void> stop() {
+    if (_disposed) return Future<void>.value();
+    final session = ++_session;
+    _reading = null;
     if (_status != TunerStatus.idle) _setStatus(TunerStatus.idle);
+    return _serialize(() async {
+      try {
+        await _release();
+        if (!_cancelled(session) && _status != TunerStatus.idle) {
+          _setStatus(TunerStatus.idle);
+        }
+      } catch (_) {
+        if (!_cancelled(session)) _setStatus(TunerStatus.error);
+      }
+    });
   }
 
   bool _cancelled(int session) => _disposed || session != _session;
 
   void _fail(int session) {
     if (_cancelled(session)) return;
-    _session++;
-    _teardown();
-    _setStatus(TunerStatus.noMicrophone);
+    final failedSession = ++_session;
+    _serialize(() async {
+      try {
+        await _release();
+      } catch (_) {
+        // A later acquisition must retry a failed release.
+      }
+      if (!_cancelled(failedSession)) _setStatus(TunerStatus.error);
+    });
   }
 
-  Future<void> _teardown() async {
+  Future<void> _release() async {
     _reading = null;
     _resetCandidate();
     final subscription = _subscription;
     _subscription = null;
     await subscription?.cancel();
-    try {
+    if (_captureOwner == this) {
       await _input.stop();
-    } catch (_) {}
+      _captureOwner = null;
+    }
   }
 
   void _onAudio(Uint8List bytes) {
@@ -200,6 +258,10 @@ class TunerController extends ChangeNotifier {
 
   void _analyze() {
     final pitch = _detector.detect(_window);
+    if (onPitch case final callback?) {
+      callback(pitch);
+      return;
+    }
     if (pitch == null ||
         !pitch.frequency.isFinite ||
         pitch.confidence < _minimumConfidence) {
@@ -268,10 +330,14 @@ class TunerController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _session++;
-    final subscription = _subscription;
-    _subscription = null;
-    subscription?.cancel();
-    _input.stop().whenComplete(_input.dispose).catchError((_) {});
+    _serialize(() async {
+      try {
+        await _release();
+      } finally {
+        await _input.dispose();
+        if (_captureOwner == this) _captureOwner = null;
+      }
+    }).catchError((Object _) {});
     super.dispose();
   }
 }

@@ -51,40 +51,66 @@ void main() {
     expect(find.byKey(const ValueKey('practice-track')), findsNothing);
   });
 
-  testWidgets(
-    'invalid timing displays static notes without playback controls',
-    (tester) async {
-      final tab = SavedTab(
-        title: 'Damaged',
-        artist: '',
-        source: '',
-        sourceUrl: '',
-        instrument: InstrumentType.bass,
-        stringCount: 4,
-        tuning: const ['D1', 'G1', 'C2', 'F2'],
-        measures: const [
-          TabMeasure(
-            number: 1,
-            numerator: 0,
-            beats: [
-              TabBeat(position: 0, notes: [TabNote(stringNumber: 1, fret: 5)]),
-            ],
-          ),
-        ],
-      );
-      await tester.pumpWidget(
-        MaterialApp(home: PracticeSessionScreen(tab: tab)),
-      );
-      expect(
-        find.textContaining('Timed practice is unavailable'),
-        findsOneWidget,
-      );
-      expect(find.textContaining('Measure 1'), findsOneWidget);
-      expect(find.byKey(const ValueKey('practice-track')), findsNothing);
-      expect(find.byKey(const ValueKey('practice-play-pause')), findsNothing);
-      expect(tester.takeException(), isNull);
-    },
-  );
+  testWidgets('invalid timing keeps scrolling and note-by-note controls', (
+    tester,
+  ) async {
+    final tab = SavedTab(
+      title: 'Damaged',
+      artist: '',
+      source: '',
+      sourceUrl: '',
+      instrument: InstrumentType.bass,
+      stringCount: 4,
+      tuning: const ['D1', 'G1', 'C2', 'F2'],
+      measures: const [
+        TabMeasure(
+          number: 1,
+          numerator: 0,
+          beats: [
+            TabBeat(position: 0, notes: [TabNote(stringNumber: 1, fret: 5)]),
+          ],
+        ),
+      ],
+    );
+    await tester.pumpWidget(MaterialApp(home: PracticeSessionScreen(tab: tab)));
+    expect(find.textContaining('Approximate timing'), findsOneWidget);
+    expect(find.byTooltip('Note Following'), findsOneWidget);
+    final play = find.byKey(const ValueKey('practice-play-pause'));
+    expect(find.byKey(const ValueKey('practice-track')), findsOneWidget);
+    await tester.ensureVisible(play);
+    await tester.pump();
+    await tester.tap(play);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byTooltip('Pause'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('ASCII tabs can scroll with approximate timing', (tester) async {
+    const tab = SavedTab(
+      title: 'Text riff',
+      artist: '',
+      source: '',
+      sourceUrl: '',
+      instrument: InstrumentType.bass,
+      stringCount: 4,
+      tuning: ['E', 'A', 'D', 'G'],
+      asciiTab: 'G|0-2-4-5-7|\nD|0--------|\nA|---------|\nE|---------|',
+    );
+    await tester.pumpWidget(
+      const MaterialApp(home: PracticeSessionScreen(tab: tab)),
+    );
+    expect(find.byTooltip('Note Following'), findsOneWidget);
+    expect(find.text('Measure 1 of 2'), findsOneWidget);
+    final play = find.byKey(const ValueKey('practice-play-pause'));
+    await tester.ensureVisible(play);
+    await tester.pump();
+    await tester.tap(play);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 3));
+    expect(find.text('Measure 2 of 2'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('repeated pause, seek, speed and replay stay within boundaries', (
     tester,

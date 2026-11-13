@@ -6,6 +6,7 @@ enum UnsupportedPassageReason {
   chord,
   overlappingNotes,
   missingPitch,
+  outsidePitchRange,
   technique,
 }
 
@@ -41,10 +42,14 @@ class PracticeProgressionController {
   PracticeProgressionController(
     this.timeline, {
     NoteMatcher? matcher,
+    bool Function(int)? supportsPitch,
     bool looping = false,
+    bool allowApproximateTiming = false,
   }) : _matcher = matcher ?? NoteMatcher() {
     _looping = looping;
-    _classify();
+    if (timeline.hasReliableTiming || allowApproximateTiming) {
+      _classify(supportsPitch);
+    }
     _sectionEnd = timeline.totalBeats;
     restart();
   }
@@ -76,8 +81,7 @@ class PracticeProgressionController {
     ),
   );
 
-  void _classify() {
-    if (!timeline.hasReliableTiming) return;
+  void _classify(bool Function(int)? supportsPitch) {
     double soundingUntil = 0;
     for (var i = 0; i < timeline.events.length;) {
       final start = timeline.events[i].startBeat;
@@ -95,6 +99,8 @@ class PracticeProgressionController {
         reason = UnsupportedPassageReason.overlappingNotes;
       } else if (pitch == null || pitch < 0 || pitch > 127) {
         reason = UnsupportedPassageReason.missingPitch;
+      } else if (supportsPitch != null && !supportsPitch(pitch)) {
+        reason = UnsupportedPassageReason.outsidePitchRange;
       } else if (notes.single.technique?.trim().isNotEmpty == true) {
         reason = UnsupportedPassageReason.technique;
       } else {
@@ -115,6 +121,10 @@ class PracticeProgressionController {
       }
     }
   }
+
+  /// Discard pre-pause observations while still requiring a repeated note to
+  /// be released before it can match again.
+  void clearEvidence() => _matcher.reset(preserveSustain: true);
 
   void setLooping(bool enabled) => _looping = enabled;
 

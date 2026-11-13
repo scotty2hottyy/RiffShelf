@@ -1,9 +1,16 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/models/saved_tab.dart';
 import '../../core/models/tab_structure.dart';
+import '../tuner/audio_input.dart';
+import '../tuner/pitch_detector.dart';
+import '../tuner/tuner_controller.dart';
+import 'note_matcher.dart';
+import 'practice_progression_controller.dart';
 import 'practice_timeline.dart';
 
 const _minZoom = 0.6;
@@ -13,7 +20,12 @@ const _maxZoom = 1.8;
 /// playhead from the right (future) and drift past it to the left (already
 /// played), while strings are laid out vertically - a 2D timeline of the tab.
 class PracticeSessionScreen extends StatefulWidget {
-  const PracticeSessionScreen({super.key, required this.tab});
+  const PracticeSessionScreen({
+    super.key,
+    required this.tab,
+    this.inputFactory,
+  });
+  final TunerAudioInput Function()? inputFactory;
   final SavedTab tab;
 
   @override
@@ -28,13 +40,31 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
   static const _basePixelsPerBeat = 70.0;
   static const _endOfTrackPadBeats = 4.0;
 
-  late final PracticeTimeline _timeline = PracticeTimeline.fromTab(widget.tab);
+  late final PracticeTimeline _timeline = PracticeTimeline.forScrolling(
+    widget.tab,
+  );
   late final double _totalBeats = _timeline.totalBeats + _endOfTrackPadBeats;
 
   final ValueNotifier<double> _elapsedBeats = ValueNotifier(0);
   late Ticker _ticker;
   Duration _lastTick = Duration.zero;
   bool _playing = false;
+  bool _noteFollowing = false;
+  TunerController? _microphone;
+  Timer? _noteTimeout;
+  String? _followFeedback;
+  String? _recognizedNote;
+  double? _followDragBeat;
+  late final PracticeProgressionController _progression =
+      PracticeProgressionController(
+        _timeline,
+        allowApproximateTiming: true,
+        supportsPitch: (midi) {
+          final hz = frequencyFromMidi(midi);
+          return hz >= PitchDetector.defaultMinFrequency &&
+              hz <= PitchDetector.defaultMaxFrequency;
+        },
+      );
   bool _looping = false;
   bool _metronome = false;
   final ValueNotifier<bool> _metronomeFlash = ValueNotifier(false);
@@ -88,12 +118,21 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The native permission dialog can make the app temporarily inactive.
+    if (_noteFollowing &&
+        state == AppLifecycleState.inactive &&
+        _microphone?.status == TunerStatus.starting) {
+      return;
+    }
     if (state != AppLifecycleState.resumed) _pause();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _noteTimeout?.cancel();
+    _microphone?.removeListener(_onMicrophoneStatus);
+    _microphone?.dispose();
     _ticker.dispose();
     _elapsedBeats.dispose();
     _metronomeFlash.dispose();
@@ -155,6 +194,10 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
 
   void _play() {
     if (_playing || _timeline.events.isEmpty) return;
+    if (_noteFollowing) {
+      _startFollowing();
+      return;
+    }
     final start = _loopStartBeat;
     final end = _loopEndBeat;
     if (_elapsedBeats.value < start || _elapsedBeats.value >= end) {
@@ -169,15 +212,166 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
     if (!_playing) return;
     _ticker.stop();
     setState(() => _playing = false);
+    if (_noteFollowing) {
+      _noteTimeout?.cancel();
+      _progression.clearEvidence();
+      unawaited(_microphone?.stop());
+    }
   }
 
   void _restart() {
+    if (_noteFollowing) {
+      _pause();
+      _progression.restart();
+      _elapsedBeats.value = _progression.positionBeats;
+      setState(_clearFollowFeedback);
+      return;
+    }
     _ticker.stop();
     _elapsedBeats.value = _loopStartBeat;
     if (_playing) setState(() => _playing = false);
   }
 
-  void _toggleLoop() => setState(() => _looping = !_looping);
+  void _toggleLoop() {
+    setState(() => _looping = !_looping);
+    if (_noteFollowing) _progression.setLooping(_looping);
+  }
+
+  void _clearFollowFeedback() {
+    _followFeedback = null;
+    _recognizedNote = null;
+  }
+
+  void _setNoteFollowing(bool enabled) {
+    _pause();
+    final position = _elapsedBeats.value;
+    setState(() {
+      _noteFollowing = enabled;
+      _clearFollowFeedback();
+    });
+    if (enabled) {
+      _syncFollowSection();
+      _progression.seek(
+        position >= _sectionEndBeat ? _loopStartBeat : position,
+      );
+      _elapsedBeats.value = _progression.positionBeats;
+    }
+  }
+
+  void _syncFollowSection() {
+    _progression.setSection(
+      startBeat: _loopStartBeat,
+      endBeat: _sectionEndBeat,
+    );
+    _progression.setLooping(_looping);
+  }
+
+  void _startFollowing() {
+    if (_progression.completed) _progression.restart();
+    _elapsedBeats.value = _progression.positionBeats;
+    if (_progression.completed) {
+      setState(
+        () => _followFeedback =
+            'No supported notes in this section. Try timed practice.',
+      );
+      return;
+    }
+    final microphone = _microphone ??= TunerController(
+      input: (widget.inputFactory ?? RecordAudioInput.new)(),
+      onPitch: _observePitch,
+    )..addListener(_onMicrophoneStatus);
+    setState(() {
+      _clearFollowFeedback();
+      _playing = true;
+    });
+    unawaited(microphone.start());
+  }
+
+  void _onMicrophoneStatus() {
+    if (!mounted || !_noteFollowing || !_playing) return;
+    final status = _microphone!.status;
+    final problem = switch (status) {
+      TunerStatus.permissionDenied =>
+        'Microphone access denied. Allow access in Settings and try again.',
+      TunerStatus.noMicrophone =>
+        'No microphone is available. Connect one or use timed practice.',
+      TunerStatus.error =>
+        'Microphone capture failed. Try again or use timed practice.',
+      TunerStatus.idle => 'Microphone stopped. Press Play to resume.',
+      _ => null,
+    };
+    if (problem != null) {
+      _pause();
+      setState(() => _followFeedback = problem);
+      return;
+    }
+    if (status == TunerStatus.listening) _armNoteTimeout();
+    setState(() {});
+  }
+
+  void _armNoteTimeout() {
+    _noteTimeout?.cancel();
+    _noteTimeout = Timer(const Duration(seconds: 20), () {
+      if (!mounted || !_noteFollowing || !_playing) return;
+      _pause();
+      setState(
+        () => _followFeedback =
+            'No matching note heard. Press Play to try again.',
+      );
+    });
+  }
+
+  void _observePitch(PitchResult? pitch) {
+    if (!mounted || !_noteFollowing || !_playing) return;
+    final result = _progression.observe(pitch);
+    if (result.matchedEvent case final matched?) {
+      _elapsedBeats.value = result.positionBeats;
+      final note = nearestNote(frequencyFromMidi(matched.expectedMidiPitch!))
+          .label;
+      setState(() {
+        _recognizedNote = 'Recognized $note';
+        _followFeedback = result.completed ? 'Section complete.' : null;
+      });
+      if (result.completed) {
+        _pause();
+      } else {
+        _armNoteTimeout();
+      }
+    } else if (result.match?.status == NoteMatchStatus.notMatched &&
+        _followFeedback != 'Waiting for the highlighted note.') {
+      setState(() => _followFeedback = 'Waiting for the highlighted note.');
+    }
+  }
+
+  Widget _followStatus() {
+    final event = _progression.expectedEvent;
+    final expected = event?.expectedMidiPitch;
+    final status = _playing
+        ? _microphone?.status == TunerStatus.listening
+              ? 'Listening'
+              : 'Starting microphone…'
+        : expected == null && _followFeedback == null
+        ? 'No supported single notes with known pitches in this section.'
+        : 'Press Play to listen';
+    final skipped = _progression.skippedPassages.length;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Semantics(
+        liveRegion: true,
+        child: Text(
+          [
+            status,
+            if (expected != null)
+              'Play ${nearestNote(frequencyFromMidi(expected)).label} (string ${event!.stringNumber}, fret ${event.fret})',
+            ?_recognizedNote,
+            ?_followFeedback,
+            if (skipped > 0) '$skipped unsupported passages skipped.',
+          ].join(' · '),
+          key: const ValueKey('practice-follow-status'),
+        ),
+      ),
+    );
+  }
 
   void _toggleMetronome() => setState(() => _metronome = !_metronome);
 
@@ -186,7 +380,13 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
   void _onSectionChanged(RangeValues value) {
     _pause();
     setState(() => _sectionIndexRange = value);
-    _elapsedBeats.value = _loopStartBeat;
+    if (_noteFollowing) {
+      _syncFollowSection();
+      _elapsedBeats.value = _progression.positionBeats;
+      setState(_clearFollowFeedback);
+    } else {
+      _elapsedBeats.value = _loopStartBeat;
+    }
   }
 
   void _resetSection() => _onSectionChanged(
@@ -196,10 +396,21 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
   void _seekByPixels(double dx) {
     if (_playing) _pause();
     final pixelsPerBeat = _basePixelsPerBeat * _scale;
-    _elapsedBeats.value = (_elapsedBeats.value - dx / pixelsPerBeat).clamp(
+    final origin = _noteFollowing
+        ? _followDragBeat ?? _elapsedBeats.value
+        : _elapsedBeats.value;
+    final target = (origin - dx / pixelsPerBeat).clamp(
       _loopStartBeat,
-      _loopEndBeat,
+      _noteFollowing ? _sectionEndBeat : _loopEndBeat,
     );
+    if (_noteFollowing) {
+      _followDragBeat = target;
+      _progression.seek(target);
+      _elapsedBeats.value = _progression.positionBeats;
+      setState(_clearFollowFeedback);
+    } else {
+      _elapsedBeats.value = target;
+    }
   }
 
   @override
@@ -215,7 +426,7 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
     final trackHeight = topPadding * 2 + (tab.stringCount - 1) * stringSpacing;
     return Scaffold(
       appBar: AppBar(title: Text('Practice · ${tab.title}')),
-      body: !_timeline.hasReliableTiming
+      body: _timeline.events.isEmpty
           ? _StaticPracticeTab(tab: tab)
           : LayoutBuilder(
               builder: (context, constraints) => SingleChildScrollView(
@@ -224,6 +435,27 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
                   child: IntrinsicHeight(
                     child: Column(
                       children: [
+                        Semantics(
+                          toggled: _noteFollowing,
+                          child: Tooltip(
+                            message: 'Note Following',
+                            child: TextButton(
+                              onPressed: () =>
+                                  _setNoteFollowing(!_noteFollowing),
+                              child: Text(
+                                _noteFollowing
+                                    ? 'Note by note ✓'
+                                    : 'Note by note',
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (_noteFollowing) _followStatus(),
+                        if (!_timeline.hasReliableTiming && !_noteFollowing)
+                          const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: Text('Approximate timing for scrolling'),
+                          ),
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                           child: Row(
@@ -233,12 +465,12 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
                                   valueListenable: _elapsedBeats,
                                   builder: (context, elapsed, _) => Text(
                                     'Measure ${_currentMeasureNumber(elapsed)} of '
-                                    '${tab.measures.isEmpty ? 0 : tab.measures.last.number}',
+                                    '${_timeline.measures.isEmpty ? 0 : _timeline.measures.last.number}',
                                     style: theme.textTheme.labelLarge,
                                   ),
                                 ),
                               ),
-                              if (_metronome)
+                              if (!_noteFollowing && _metronome)
                                 ValueListenableBuilder<bool>(
                                   key: const ValueKey(
                                     'practice-metronome-flash',
@@ -310,6 +542,8 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
                                     child: GestureDetector(
                                       key: const ValueKey('practice-track'),
                                       behavior: HitTestBehavior.opaque,
+                                      onHorizontalDragStart: (_) =>
+                                          _followDragBeat = null,
                                       onHorizontalDragUpdate: (details) =>
                                           _seekByPixels(details.delta.dx),
                                       child: ClipRect(
@@ -387,6 +621,7 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
                           ),
                         ),
                         _PracticeControls(
+                          noteFollowing: _noteFollowing,
                           playing: _playing,
                           looping: _looping,
                           metronome: _metronome,
@@ -415,9 +650,9 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
   }
 
   int _currentMeasureNumber(double elapsed) {
-    var current = widget.tab.measures.isEmpty
+    var current = _timeline.measures.isEmpty
         ? 0
-        : widget.tab.measures.first.number;
+        : _timeline.measures.first.number;
     for (final marker in _timeline.measures) {
       if (marker.startBeat <= elapsed) {
         current = marker.number;
@@ -772,6 +1007,7 @@ class _PracticeTrackPainter extends CustomPainter {
 
 class _PracticeControls extends StatelessWidget {
   const _PracticeControls({
+    required this.noteFollowing,
     required this.playing,
     required this.looping,
     required this.metronome,
@@ -785,6 +1021,7 @@ class _PracticeControls extends StatelessWidget {
     required this.onSpeedChanged,
     required this.onScaleChanged,
   });
+  final bool noteFollowing;
   final bool playing;
   final bool looping;
   final bool metronome;
@@ -840,79 +1077,84 @@ class _PracticeControls extends StatelessWidget {
                     icon: Icon(Icons.repeat, color: looping ? accent : null),
                   ),
                 ),
-                Semantics(
-                  toggled: metronome,
-                  child: IconButton(
-                    key: const ValueKey('practice-metronome-toggle'),
-                    tooltip: metronome ? 'Metronome on' : 'Metronome off',
-                    onPressed: onToggleMetronome,
-                    icon: Icon(
-                      Icons.av_timer,
-                      color: metronome ? accent : null,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '${speedPercent.round()}% · ${effectiveBpm.round()} BPM',
-              style: Theme.of(context).textTheme.labelMedium,
-            ),
-            Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 4,
-              runSpacing: 2,
-              children: [
-                for (final speed in const [25, 50, 75, 100, 150])
+                if (!noteFollowing)
                   Semantics(
-                    button: true,
-                    selected: speedPercent == speed,
-                    label: '$speed% speed',
-                    child: InkWell(
-                      key: ValueKey('practice-speed-$speed'),
-                      onTap: () => onSpeedChanged(speed.toDouble()),
-                      borderRadius: BorderRadius.circular(10),
-                      child: Container(
-                        width:
-                            58 *
-                            (MediaQuery.textScalerOf(context).scale(14) / 14)
-                                .clamp(1.0, 2.5),
-                        constraints: const BoxConstraints(
-                          minWidth: 50,
-                          minHeight: 48,
-                        ),
-                        alignment: Alignment.center,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: speedPercent == speed
-                              ? accent.withValues(alpha: .15)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: speedPercent == speed
-                                ? accent
-                                : Theme.of(context).colorScheme.outlineVariant,
-                          ),
-                        ),
-                        child: Text(
-                          '$speed%',
-                          style: Theme.of(context).textTheme.labelMedium
-                              ?.copyWith(
-                                color: speedPercent == speed ? accent : null,
-                                fontWeight: speedPercent == speed
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
-                              ),
-                        ),
+                    toggled: metronome,
+                    child: IconButton(
+                      key: const ValueKey('practice-metronome-toggle'),
+                      tooltip: metronome ? 'Metronome on' : 'Metronome off',
+                      onPressed: onToggleMetronome,
+                      icon: Icon(
+                        Icons.av_timer,
+                        color: metronome ? accent : null,
                       ),
                     ),
                   ),
               ],
             ),
+            if (!noteFollowing) ...[
+              const SizedBox(height: 4),
+              Text(
+                '${speedPercent.round()}% · ${effectiveBpm.round()} BPM',
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 4,
+                runSpacing: 2,
+                children: [
+                  for (final speed in const [25, 50, 75, 100, 150])
+                    Semantics(
+                      button: true,
+                      selected: speedPercent == speed,
+                      label: '$speed% speed',
+                      child: InkWell(
+                        key: ValueKey('practice-speed-$speed'),
+                        onTap: () => onSpeedChanged(speed.toDouble()),
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          width:
+                              58 *
+                              (MediaQuery.textScalerOf(context).scale(14) / 14)
+                                  .clamp(1.0, 2.5),
+                          constraints: const BoxConstraints(
+                            minWidth: 50,
+                            minHeight: 48,
+                          ),
+                          alignment: Alignment.center,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: speedPercent == speed
+                                ? accent.withValues(alpha: .15)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: speedPercent == speed
+                                  ? accent
+                                  : Theme.of(context)
+                                        .colorScheme
+                                        .outlineVariant,
+                            ),
+                          ),
+                          child: Text(
+                            '$speed%',
+                            style: Theme.of(context).textTheme.labelMedium
+                                ?.copyWith(
+                                  color: speedPercent == speed ? accent : null,
+                                  fontWeight: speedPercent == speed
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
             Row(
               children: [
                 const Icon(Icons.zoom_in, size: 18),
