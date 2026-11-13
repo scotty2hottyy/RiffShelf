@@ -1126,39 +1126,43 @@ void main() {
     testWidgets('cached artwork renders offline on $platform', (tester) async {
       debugDefaultTargetPlatformOverride = platform;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
-      final online = serviceFor(
-        (request) => request.url.host == 'coverartarchive.org'
-            ? http.Response(jsonEncode(cover()), 200)
-            : http.Response.bytes(
-                base64Decode(png),
-                200,
-                headers: {'content-type': 'image/png'},
-              ),
-      );
-      final album = const AlbumCandidate(id1, 'First', 'Artist', '2000');
-      final metadata = (await tester.runAsync(() => online.select(album)))!;
-      var requests = 0;
-      final offline = serviceFor((_) {
-        requests++;
-        throw http.ClientException('offline');
-      });
-      final restored = (await tester.runAsync(() => offline.select(album)))!;
-      expect(requests, 0);
-      expect(
-        (jsonDecode(restored) as Map)['local_path'],
-        (jsonDecode(metadata) as Map)['local_path'],
-      );
-      await tester.pumpWidget(
-        MaterialApp(
-          home: AlbumArt(tab: tab.copyWith(artwork: restored), size: 48),
-        ),
-      );
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)),
-      );
-      await tester.pumpAndSettle();
-      expect(find.byType(Image), findsOneWidget);
-      expect(find.byIcon(Icons.album_outlined), findsNothing);
+      try {
+        final online = serviceFor(
+          (request) => request.url.host == 'coverartarchive.org'
+              ? http.Response(jsonEncode(cover()), 200)
+              : http.Response.bytes(
+                  base64Decode(png),
+                  200,
+                  headers: {'content-type': 'image/png'},
+                ),
+        );
+        final album = const AlbumCandidate(id1, 'First', 'Artist', '2000');
+        final metadata = (await tester.runAsync(() => online.select(album)))!;
+        var requests = 0;
+        final offline = serviceFor((_) {
+          requests++;
+          throw http.ClientException('offline');
+        });
+        final restored = (await tester.runAsync(() => offline.select(album)))!;
+        expect(requests, 0);
+        expect(
+          (jsonDecode(restored) as Map)['local_path'],
+          (jsonDecode(metadata) as Map)['local_path'],
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            home: AlbumArt(tab: tab.copyWith(artwork: restored), size: 48),
+          ),
+        );
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(Image), findsOneWidget);
+        expect(find.byIcon(Icons.album_outlined), findsNothing);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
     });
   }
 
