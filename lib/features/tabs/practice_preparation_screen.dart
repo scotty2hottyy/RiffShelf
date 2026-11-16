@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../../core/database/practice_session_repository.dart';
 import '../../core/models/saved_tab.dart';
 import '../../core/models/tuning.dart';
 import '../../screens/tuner_screen.dart';
@@ -8,9 +9,14 @@ import 'practice_session_screen.dart';
 
 /// Keeps the chosen arrangement in place while the player tunes or skips ahead.
 class PracticePreparationScreen extends StatelessWidget {
-  const PracticePreparationScreen({super.key, required this.tab});
+  const PracticePreparationScreen({
+    super.key,
+    required this.tab,
+    this.historyRepository,
+  });
 
   final SavedTab tab;
+  final PracticeSessionRepository? historyRepository;
 
   TuningPreset? get _tuning {
     if (tab.tuning.length != tab.stringCount || tab.tuning.isEmpty) return null;
@@ -79,7 +85,10 @@ class PracticePreparationScreen extends StatelessWidget {
               onPressed: () => Navigator.push<void>(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => PracticeSessionScreen(tab: tab),
+                  builder: (_) => PracticeSessionScreen(
+                    tab: tab,
+                    historyRepository: historyRepository,
+                  ),
                 ),
               ),
               icon: const Icon(Icons.play_arrow),
