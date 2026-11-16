@@ -4,7 +4,9 @@ import 'dart:typed_data';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:riffshelf/core/database/practice_session_repository.dart';
 import 'package:riffshelf/core/models/instrument_type.dart';
+import 'package:riffshelf/core/models/practice_session.dart';
 import 'package:riffshelf/core/models/saved_tab.dart';
 import 'package:riffshelf/core/models/tab_structure.dart';
 import 'package:riffshelf/features/tabs/practice_session_screen.dart';
@@ -59,6 +61,16 @@ class FakeAudio implements TunerAudioInput {
   }
 }
 
+class FakeHistory implements PracticeSessionRepository {
+  final List<PracticeSession> sessions = [];
+  @override
+  Future<void> save(PracticeSession session) async => sessions.add(session);
+  @override
+  Future<List<PracticeSession>> getAll() async => sessions;
+  @override
+  Future<void> clear() async => sessions.clear();
+}
+
 SavedTab tab({bool chord = false, bool approximate = false}) => SavedTab(
   title: 'Following fixture',
   artist: '',
@@ -101,12 +113,14 @@ Future<void> showPractice(
   FakeAudio audio, {
   bool chord = false,
   bool approximate = false,
+  PracticeSessionRepository? history,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
       home: PracticeSessionScreen(
         tab: tab(chord: chord, approximate: approximate),
         inputFactory: () => audio,
+        historyRepository: history,
       ),
     ),
   );
@@ -135,6 +149,25 @@ Future<void> frames(
 }
 
 void main() {
+  testWidgets('saves confirmed note-by-note matches, not incorrect pitches', (
+    tester,
+  ) async {
+    final audio = FakeAudio();
+    final history = FakeHistory();
+    await showPractice(tester, audio, history: history);
+    await tester.tap(find.text('Note by note'));
+    await tester.pump();
+    await tapPlay(tester);
+    await frames(tester, audio, 880, 3);
+    await frames(tester, audio, 440, 3);
+    await tester.tap(find.byKey(const ValueKey('save-practice-session')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(history.sessions.single.confirmedNotes, 1);
+    expect(history.sessions.single.markedComplete, isFalse);
+  });
+
   testWidgets('visible note-by-note mode matches pitches on approximate tabs', (
     tester,
   ) async {

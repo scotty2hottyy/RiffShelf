@@ -48,6 +48,8 @@ Timed practice uses structured measure and note data from supported guitar and b
 
 In Practice, choose **Note by note** and press **Play** to wait for each correct pitch. This mode requires known pitches, but can use approximate timing for note order. Ordinary scrolling uses authored timing when valid and offers labeled approximate timing for readable ASCII tabs or structured tabs with unreliable timing. Approximate scrolling spaces source beat groups or ASCII fret columns evenly; it does not infer the song’s rhythm. Tabs without readable fret notes remain view-only. Tempo automation, repeats, ties, and expressive techniques from source files are not currently modeled by the practice timeline.
 
+To keep an optional local record, press the **Save session** icon in practice. You can mark the currently selected section complete yourself; the app does not infer completion from scrolling. Practice time counts while playback or note following is active, and confirmed notes count successful note-by-note matches, including repeats. The counts cover activity since the last save, even if the selected section changes. Open **Practice → Practice history** for per-session and all-time totals, or clear all history there. Sessions are stored only on this device. Leaving without saving discards the current record. Timing, note-match and combined accuracy are not available: note-by-note mode waits for a pitch without measuring rhythm or missed notes, and scrolling does not listen for playing.
+
 ## Search and metadata backend
 
 The independent FastAPI service and its setup, testing, and deployment-planning instructions are in [server/README.md](server/README.md).
