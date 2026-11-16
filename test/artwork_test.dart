@@ -521,6 +521,48 @@ void main() {
     expect(requests, hasLength(3));
   });
 
+  test(
+    'manually selected artwork remains available offline after reopening',
+    () async {
+      var requests = 0;
+      final service = serviceFor((request) {
+        requests++;
+        if (request.url.host == 'coverartarchive.org') {
+          return http.Response(jsonEncode(cover()), 200);
+        }
+        return http.Response.bytes(
+          base64Decode(png),
+          200,
+          headers: {'content-type': 'image/png'},
+        );
+      });
+      final artwork = await service.select(
+        const AlbumCandidate(id1, 'First', 'Artist', '2000'),
+      );
+      final selected = tab.copyWith(artwork: artwork);
+      await repo.save(selected);
+      final localPath = artworkMetadata(selected)!['local_path'] as String;
+
+      await repo.close();
+      repo = SqliteTabRepository(databaseFactoryFfi, '${dir.path}/tabs.db');
+      final reopened = (await repo.getById(tab.id!))!;
+      expect(reopened.artwork, artwork);
+      expect(await File(localPath).exists(), isTrue);
+
+      final offline = ArtworkService(
+        cacheDirectory: dir,
+        client: MockClient((_) async => throw StateError('Unexpected request')),
+      );
+      final cached = jsonDecode(
+        await offline.select(
+          const AlbumCandidate(id1, 'First', 'Artist', '2000'),
+        ),
+      ) as Map;
+      expect(cached['local_path'], localPath);
+      expect(requests, 2);
+    },
+  );
+
   test('invalid metadata, missing art, and provider failures leave saved tabs untouched', () async {
     var count = 0;
     var payload = {

@@ -238,12 +238,18 @@ void main() {
     await tester.tap(find.byTooltip('Clear filters'));
     await tester.pumpAndSettle();
     expect(find.text('Offline song'), findsOneWidget);
-    expect(find.textContaining('? ? ? ?'), findsOneWidget);
+    // Library cards show only the Instrument/Type/Tuning chips, with the
+    // tuning rendered by common name instead of raw string pitches.
+    expect(find.widgetWithText(Chip, 'Bass'), findsOneWidget);
+    expect(find.widgetWithText(Chip, 'Custom Tuning'), findsOneWidget);
+    expect(find.textContaining('? ? ? ?'), findsNothing);
     await tester.tap(find.byTooltip('Add favorite'));
     await tester.pumpAndSettle();
     expect(repo.data.single.isFavorite, isTrue);
     expect(find.byTooltip('Remove favorite'), findsOneWidget);
-    expect(find.widgetWithText(Chip, 'old'), findsOneWidget);
+    // Tags remain saved but are no longer shown as chips on the card.
+    expect(find.widgetWithText(Chip, 'old'), findsNothing);
+    expect(repo.data.single.tags, ['old']);
     await tester.tap(find.text('Offline song'));
     await tester.pumpAndSettle();
     expect(find.text('G|--0--|\nD|--1--|'), findsOneWidget);
@@ -320,12 +326,13 @@ void main() {
           scrollable: find.byType(Scrollable).first,
         );
         expect(find.text('Offline song'), findsOneWidget);
-        expect(
-          find.text('local'),
-          findsNothing,
-        ); // Source is part of the metadata line.
-        expect(find.textContaining('local'), findsOneWidget);
-        expect(find.widgetWithText(Chip, 'old'), findsOneWidget);
+        // Library cards no longer show source, track name, string count, or
+        // tags; only the Instrument/Type/Tuning chips remain.
+        expect(find.textContaining('local'), findsNothing);
+        expect(find.widgetWithText(Chip, 'old'), findsNothing);
+        expect(find.widgetWithText(Chip, 'Bass'), findsOneWidget);
+        expect(find.widgetWithText(Chip, 'Custom Tuning'), findsOneWidget);
+        expect(tester.takeException(), isNull);
       },
     );
   }

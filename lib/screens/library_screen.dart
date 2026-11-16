@@ -8,6 +8,7 @@ import '../core/database/sqlite_tab_repository.dart';
 import '../core/database/tab_repository.dart';
 import '../core/models/saved_tab.dart';
 import '../core/models/instrument_type.dart';
+import '../core/models/tuning.dart';
 import '../features/library/edit_tab_screen.dart';
 import '../features/import/tab_import_service.dart';
 import '../features/import/guitar_pro_importer.dart';
@@ -559,6 +560,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 }
 
+/// Compact classification chips for a Library card: instrument (Guitar or
+/// Bass), build (Electric or Acoustic), and tuning by common name. Unknown
+/// classifications are omitted rather than shown as "Other" chips, and the
+/// full tuning note list is never shown here; see [CommonTuningNames].
+List<String> _libraryCardChips(SavedTab tab) => [
+  if (tab.instrument != InstrumentType.other) tab.instrument.label,
+  if (tab.classification != InstrumentClassification.other)
+    tab.classification.label,
+  if (tab.tuning.isNotEmpty) CommonTuningNames.of(tab.tuning, tab.instrument),
+];
+
 class _LibraryCard extends StatelessWidget {
   const _LibraryCard({
     required this.tab,
@@ -621,46 +633,34 @@ class _LibraryCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        Text(
-                          tab.instrument == InstrumentType.other
-                              ? 'Unknown instrument'
-                              : tab.instrument.label,
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            color: accent,
-                            fontWeight: FontWeight.w700,
-                          ),
+                        // Only the classification details a player needs at a
+                        // glance: instrument, build, and tuning by common
+                        // name. Full metadata, tags, and filters remain in
+                        // the detail and edit screens.
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: [
+                            for (final label in _libraryCardChips(tab))
+                              Chip(
+                                label: Text(label),
+                                labelStyle: theme.textTheme.labelMedium
+                                    ?.copyWith(
+                                      color: accent,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                visualDensity: VisualDensity.compact,
+                                padding: EdgeInsets.zero,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                              ),
+                          ],
                         ),
                       ],
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                [
-                  '${tab.stringCount} strings',
-                  if (tab.tuning.isNotEmpty) tab.tuning.join(' '),
-                  if (tab.trackName?.trim().isNotEmpty == true) tab.trackName!,
-                  if (tab.source.trim().isNotEmpty) tab.source,
-                ].join(' · '),
-                style: theme.textTheme.bodyMedium?.copyWith(color: muted),
-              ),
-              if (tab.tags.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: [
-                    for (final tag in tab.tags)
-                      Chip(
-                        label: Text(tag),
-                        visualDensity: VisualDensity.compact,
-                        padding: EdgeInsets.zero,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                  ],
-                ),
-              ],
               Row(
                 children: [
                   Semantics(
