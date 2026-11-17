@@ -96,10 +96,22 @@ class _PracticeHistoryScreenState extends State<PracticeHistoryScreen> {
             Text('Practice time: ${_duration(summary.durationMilliseconds)}'),
             Text('Sections marked complete: ${summary.completedSections}'),
             Text('Note-by-note confirmed notes: ${summary.confirmedNotes}'),
-            const Text(
-              'Timing, note-match and combined accuracy are unavailable: '
-              'these modes do not measure rhythm or missed notes.',
-            ),
+            if (summary.totalHits > 0 || summary.totalMisses > 0) ...[
+              Text('Timed practice hits: ${summary.totalHits}'),
+              Text('Timed practice misses: ${summary.totalMisses}'),
+              if (summary.averageAccuracy != null)
+                Text(
+                  'Timed practice accuracy: ${summary.averageAccuracy!.toStringAsFixed(1)}%',
+                ),
+              const Text(
+                'Timed practice measures single-note pitch accuracy within timing tolerance windows. '
+                'Note-by-note mode and chords do not assess rhythm or missed notes.',
+              ),
+            ] else
+              const Text(
+                'Timing, note-match and combined accuracy are unavailable: '
+                'these modes do not measure rhythm or missed notes.',
+              ),
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton(
@@ -122,7 +134,10 @@ class _PracticeHistoryScreenState extends State<PracticeHistoryScreen> {
                       session.markedComplete
                           ? 'Section marked complete by you'
                           : 'Section not marked complete',
-                      'Note-by-note confirmed notes: ${session.confirmedNotes}',
+                      if (session.hits != null && session.misses != null)
+                        'Timed practice: ${session.hits} hits, ${session.misses} misses (${session.accuracy?.toStringAsFixed(1) ?? '0.0'}% accuracy)'
+                      else
+                        'Note-by-note confirmed notes: ${session.confirmedNotes}',
                     ].join('\n'),
                   ),
                   isThreeLine: true,

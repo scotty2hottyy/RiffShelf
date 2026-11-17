@@ -195,7 +195,8 @@ void main() {
       await tapPlay(tester);
       await tester.pump(const Duration(seconds: 3));
       expect(find.text('Measure 2 of 2'), findsOneWidget);
-      expect(audio.starts, 0);
+      expect(audio.starts, 1);
+      await tester.ensureVisible(find.text('Note by note'));
       await tester.tap(find.text('Note by note'));
       await tester.pump();
       final restart = find.byTooltip('Restart');
@@ -220,7 +221,7 @@ void main() {
       await frames(tester, audio, 493.883, 3);
       expect(find.textContaining('Section complete.'), findsOneWidget);
       await tester.pumpAndSettle();
-      expect(audio.stops, 1);
+      expect(audio.stops, 2);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
       expect(audio.disposals, 1);

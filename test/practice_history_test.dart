@@ -81,7 +81,109 @@ void main() {
       final db = await tabs.database;
       expect(await db.query('saved_tabs'), hasLength(1));
       expect(await db.query('practice_sessions'), isEmpty);
+      await db.close();
       await tabs.close();
     });
   }
+
+  test(
+    'upgrades version 6 practice history to version 7 preserving existing data',
+    () async {
+      final old = await databaseFactoryFfi.openDatabase(
+        path,
+        options: OpenDatabaseOptions(
+          version: 6,
+          onCreate: (db, version) async {
+            await db.execute('''
+            CREATE TABLE saved_tabs (
+              id INTEGER PRIMARY KEY,
+              title TEXT,
+              artist TEXT,
+              source TEXT,
+              source_url TEXT,
+              instrument TEXT,
+              string_count INTEGER,
+              tuning TEXT,
+              tuning_key TEXT,
+              tags TEXT,
+              ascii_tab TEXT,
+              structure TEXT,
+              classification TEXT,
+              is_favorite INTEGER
+            )
+          ''');
+            await db.execute('''
+            CREATE TABLE practice_history (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              title TEXT NOT NULL,
+              artist TEXT NOT NULL,
+              saved_at TEXT NOT NULL,
+              duration_ms INTEGER NOT NULL,
+              start_measure INTEGER,
+              end_measure INTEGER,
+              marked_complete INTEGER NOT NULL,
+              confirmed_notes INTEGER NOT NULL
+            )
+          ''');
+            await db.insert('practice_history', {
+              'title': 'V6 Legacy Session',
+              'artist': 'Legacy Artist',
+              'saved_at': DateTime.utc(2025, 12, 1).toIso8601String(),
+              'duration_ms': 45000,
+              'start_measure': 1,
+              'end_measure': 3,
+              'marked_complete': 1,
+              'confirmed_notes': 12,
+            });
+          },
+        ),
+      );
+      await old.close();
+
+      final tabs = SqliteTabRepository(databaseFactoryFfi, path);
+      final history = SqlitePracticeSessionRepository(tabs);
+
+      final loaded = await history.getAll();
+      expect(loaded, hasLength(1));
+      expect(loaded.first.title, 'V6 Legacy Session');
+      expect(loaded.first.hits, isNull);
+      expect(loaded.first.misses, isNull);
+      expect(loaded.first.accuracy, isNull);
+      expect(loaded.first.confirmedNotes, 12);
+
+      final newSession = PracticeSession(
+        title: 'V7 Timed Session',
+        artist: 'New Artist',
+        savedAt: DateTime.utc(2026, 1, 15),
+        durationMilliseconds: 60000,
+        startMeasure: 1,
+        endMeasure: 4,
+        markedComplete: true,
+        confirmedNotes: 8,
+        hits: 8,
+        misses: 2,
+        accuracy: 80.0,
+      );
+      await history.save(newSession);
+
+      final updated = await history.getAll();
+      expect(updated, hasLength(2));
+      final v7 = updated.firstWhere((s) => s.title == 'V7 Timed Session');
+      expect(v7.hits, 8);
+      expect(v7.misses, 2);
+      expect(v7.accuracy, 80.0);
+
+      final v6 = updated.firstWhere((s) => s.title == 'V6 Legacy Session');
+      expect(v6.hits, isNull);
+      expect(v6.misses, isNull);
+
+      final summary = PracticeHistorySummary(updated);
+      expect(summary.sessions, 2);
+      expect(summary.totalHits, 8);
+      expect(summary.totalMisses, 2);
+      expect(summary.averageAccuracy, 80.0);
+
+      await tabs.close();
+    },
+  );
 }

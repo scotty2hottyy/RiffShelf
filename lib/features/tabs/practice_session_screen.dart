@@ -15,6 +15,7 @@ import '../tuner/tuner_controller.dart';
 import 'note_matcher.dart';
 import 'practice_progression_controller.dart';
 import 'practice_timeline.dart';
+import 'timed_practice_scorer.dart';
 
 const _minZoom = 0.6;
 const _maxZoom = 1.8;
@@ -122,6 +123,18 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
       _sectionEndBeat +
       (!_looping && _isWholeSongSelected ? _endOfTrackPadBeats : 0);
 
+  late final TimedPracticeScorer _timedScorer = TimedPracticeScorer(
+    timeline: _timeline,
+    bpm: _bpm,
+    startBeat: _loopStartBeat,
+    endBeat: _sectionEndBeat,
+    supportsPitch: (midi) {
+      final hz = frequencyFromMidi(midi);
+      return hz >= PitchDetector.defaultMinFrequency &&
+          hz <= PitchDetector.defaultMaxFrequency;
+    },
+  );
+
   @override
   void initState() {
     super.initState();
@@ -164,6 +177,7 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
     if (rawNext < loopEnd) {
       _fireMetronomeTicks(previous, rawNext);
       _elapsedBeats.value = rawNext;
+      _timedScorer.updatePosition(rawNext);
       return;
     }
 
@@ -177,8 +191,11 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
       // sure its click fires even though playback jumps straight past it.
       _fireMetronomeTicks(loopStart - 0.001, wrapped);
       _elapsedBeats.value = wrapped;
+      _timedScorer.updatePosition(loopEnd);
+      _timedScorer.recordLoopWrap(wrapped);
     } else {
       _elapsedBeats.value = loopEnd;
+      _timedScorer.updatePosition(loopEnd);
       _pause();
     }
   }
@@ -217,11 +234,23 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
     if (_elapsedBeats.value < start || _elapsedBeats.value >= end) {
       _elapsedBeats.value = start;
     }
+    _timedScorer.updatePosition(_elapsedBeats.value);
     _lastTick = Duration.zero;
     _ticker.start();
     _practiceTime.start();
     _hasPracticed = true;
+    _startTimedMicrophone();
     setState(() => _playing = true);
+  }
+
+  void _startTimedMicrophone() {
+    final microphone = _microphone ??= TunerController(
+      input: (widget.inputFactory ?? RecordAudioInput.new)(),
+      onPitch: _observePitch,
+    )..addListener(_onMicrophoneStatus);
+    _timedScorer.isMicrophoneActive =
+        microphone.status == TunerStatus.listening;
+    unawaited(microphone.start());
   }
 
   void _pause() {
@@ -233,6 +262,9 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
       _noteTimeout?.cancel();
       _progression.clearEvidence();
       unawaited(_microphone?.stop());
+    } else {
+      unawaited(_microphone?.stop());
+      _timedScorer.isMicrophoneActive = false;
     }
   }
 
@@ -246,6 +278,7 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
     }
     _pause();
     _elapsedBeats.value = _loopStartBeat;
+    _timedScorer.restart();
   }
 
   void _toggleLoop() {
@@ -306,8 +339,13 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
   }
 
   void _onMicrophoneStatus() {
-    if (!mounted || !_noteFollowing || !_playing) return;
+    if (!mounted || !_playing) return;
     final status = _microphone!.status;
+    if (!_noteFollowing) {
+      _timedScorer.isMicrophoneActive = status == TunerStatus.listening;
+      setState(() {});
+      return;
+    }
     final problem = switch (status) {
       TunerStatus.permissionDenied =>
         'Microphone access denied. Allow access in Settings and try again.',
@@ -340,25 +378,30 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
   }
 
   void _observePitch(PitchResult? pitch) {
-    if (!mounted || !_noteFollowing || !_playing) return;
-    final result = _progression.observe(pitch);
-    if (result.matchedEvent case final matched?) {
-      _confirmedNotes++;
-      _elapsedBeats.value = result.positionBeats;
-      final note = nearestNote(frequencyFromMidi(matched.expectedMidiPitch!))
-          .label;
-      setState(() {
-        _recognizedNote = 'Recognized $note';
-        _followFeedback = result.completed ? 'Section complete.' : null;
-      });
-      if (result.completed) {
-        _pause();
-      } else {
-        _armNoteTimeout();
+    if (!mounted || !_playing) return;
+    if (_noteFollowing) {
+      final result = _progression.observe(pitch);
+      if (result.matchedEvent case final matched?) {
+        _confirmedNotes++;
+        _elapsedBeats.value = result.positionBeats;
+        final note = nearestNote(frequencyFromMidi(matched.expectedMidiPitch!))
+            .label;
+        setState(() {
+          _recognizedNote = 'Recognized $note';
+          _followFeedback = result.completed ? 'Section complete.' : null;
+        });
+        if (result.completed) {
+          _pause();
+        } else {
+          _armNoteTimeout();
+        }
+      } else if (result.match?.status == NoteMatchStatus.notMatched &&
+          _followFeedback != 'Waiting for the highlighted note.') {
+        setState(() => _followFeedback = 'Waiting for the highlighted note.');
       }
-    } else if (result.match?.status == NoteMatchStatus.notMatched &&
-        _followFeedback != 'Waiting for the highlighted note.') {
-      setState(() => _followFeedback = 'Waiting for the highlighted note.');
+    } else {
+      _timedScorer.observePitch(pitch);
+      setState(() {});
     }
   }
 
@@ -392,12 +435,96 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
     );
   }
 
+  Widget _timedScrollingStatus() {
+    final status = switch (_microphone?.status) {
+      TunerStatus.listening => 'Listening',
+      TunerStatus.starting => 'Starting microphone…',
+      TunerStatus.permissionDenied =>
+        'Microphone access denied (scrolling continues without scoring)',
+      TunerStatus.noMicrophone =>
+        'No microphone available (scrolling continues without scoring)',
+      TunerStatus.error =>
+        'Microphone capture failed (scrolling continues without scoring)',
+      _ => _playing ? 'Listening' : 'Press Play to practice',
+    };
+
+    final isSectionComplete =
+        _timedScorer.isSectionComplete ||
+        (!_playing &&
+            _hasPracticed &&
+            _elapsedBeats.value >= _sectionEndBeat - 0.05);
+    final hits = _timedScorer.hits;
+    final misses = _timedScorer.misses;
+    final total = hits + misses;
+    final accuracy = _timedScorer.accuracyPercentage;
+
+    final String statusText;
+    if (isSectionComplete) {
+      if (_timedScorer.eligibleNoteCount == 0) {
+        statusText = 'Section complete · No eligible single notes in section';
+      } else {
+        statusText =
+            'Section complete · $hits ${hits == 1 ? "hit" : "hits"} · $misses ${misses == 1 ? "miss" : "misses"} · ${accuracy.toStringAsFixed(1)}% accuracy';
+      }
+    } else {
+      statusText =
+          '$status · Hits: $hits · Misses: $misses${total > 0 ? " · ${accuracy.toStringAsFixed(1)}%" : ""}';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                '$statusText · Single notes only (±250 ms)',
+                key: const ValueKey('timed-practice-status'),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontWeight: isSectionComplete ? FontWeight.bold : null,
+                ),
+              ),
+            ),
+          ),
+          if (isSectionComplete && !_savingSession && _hasPracticed)
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: FilledButton.tonalIcon(
+                key: const ValueKey('save-timed-practice-results'),
+                onPressed: _saveSession,
+                icon: const Icon(Icons.save_outlined, size: 18),
+                label: const Text('Save results'),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   void _toggleMetronome() => setState(() => _metronome = !_metronome);
 
   Future<void> _saveSession() async {
     if (_savingSession || !_hasPracticed) return;
     _pause();
     var markedComplete = false;
+    final isTimed = !_noteFollowing;
+    final int? hits = isTimed && _timedScorer.hasEvaluatedNotes
+        ? _timedScorer.hits
+        : (isTimed && _timedScorer.lastCompletedHits != null
+              ? _timedScorer.lastCompletedHits
+              : null);
+    final int? misses = isTimed && _timedScorer.hasEvaluatedNotes
+        ? _timedScorer.misses
+        : (isTimed && _timedScorer.lastCompletedMisses != null
+              ? _timedScorer.lastCompletedMisses
+              : null);
+    final double? accuracy = isTimed && _timedScorer.hasEvaluatedNotes
+        ? _timedScorer.accuracyPercentage
+        : (isTimed && _timedScorer.lastCompletedAccuracy != null
+              ? _timedScorer.lastCompletedAccuracy
+              : null);
+
     final save = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -406,9 +533,12 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                'Practice time and confirmed notes are stored on this device. '
-                'The selected section is recorded as it is now.',
+              Text(
+                isTimed && (hits != null || misses != null)
+                    ? 'Practice time: ${_practiceTime.elapsed.inSeconds}s · $hits hits, $misses misses (${accuracy?.toStringAsFixed(1)}% accuracy).\n'
+                          'The selected section is recorded as it is now.'
+                    : 'Practice time and confirmed notes are stored on this device. '
+                          'The selected section is recorded as it is now.',
               ),
               CheckboxListTile(
                 value: markedComplete,
@@ -446,12 +576,16 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
           ? null
           : _timeline.measures[endIndex].number,
       markedComplete: markedComplete,
-      confirmedNotes: _confirmedNotes,
+      confirmedNotes: isTimed ? (hits ?? 0) : _confirmedNotes,
+      hits: hits,
+      misses: misses,
+      accuracy: accuracy,
     );
     try {
       await _history.save(session);
       _practiceTime.reset();
       _confirmedNotes = 0;
+      _timedScorer.resetSession();
       _hasPracticed = false;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -469,7 +603,10 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
     }
   }
 
-  void _onSpeedChanged(double value) => setState(() => _speedPercent = value);
+  void _onSpeedChanged(double value) => setState(() {
+    _speedPercent = value;
+    _timedScorer.setBpm(_bpm);
+  });
 
   void _onSectionChanged(RangeValues value) {
     _pause();
@@ -480,6 +617,10 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
       setState(_clearFollowFeedback);
     } else {
       _elapsedBeats.value = _loopStartBeat;
+      _timedScorer.setSection(
+        startBeat: _loopStartBeat,
+        endBeat: _sectionEndBeat,
+      );
     }
   }
 
@@ -504,6 +645,7 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
       setState(_clearFollowFeedback);
     } else {
       _elapsedBeats.value = target;
+      _timedScorer.seekTo(target);
     }
   }
 
@@ -572,7 +714,13 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
                             ],
                           ),
                         ),
-                        if (_noteFollowing) _followStatus(),
+                        if (_noteFollowing)
+                          _followStatus()
+                        else
+                          ValueListenableBuilder<double>(
+                            valueListenable: _elapsedBeats,
+                            builder: (context, _, _) => _timedScrollingStatus(),
+                          ),
                         if (!_timeline.hasReliableTiming && !_noteFollowing)
                           const Padding(
                             padding: EdgeInsets.all(12),
@@ -679,34 +827,37 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
                                                     constraints.maxWidth,
                                                     trackHeight,
                                                   ),
-                                                  painter:
-                                                      _PracticeTrackPainter(
-                                                        stringCount:
-                                                            tab.stringCount,
-                                                        events:
-                                                            _timeline.events,
-                                                        measures:
-                                                            _timeline.measures,
-                                                        elapsedBeats: elapsed,
-                                                        pixelsPerBeat:
-                                                            _basePixelsPerBeat *
-                                                            _scale,
-                                                        playheadX: _playheadX,
-                                                        stringSpacing:
-                                                            stringSpacing,
-                                                        topPadding: topPadding,
-                                                        colorScheme:
-                                                            theme.colorScheme,
-                                                        textScale: textScale,
-                                                        sectionStartBeat:
-                                                            _isWholeSongSelected
-                                                            ? null
-                                                            : _loopStartBeat,
-                                                        sectionEndBeat:
-                                                            _isWholeSongSelected
-                                                            ? null
-                                                            : _sectionEndBeat,
-                                                      ),
+                                                  painter: _PracticeTrackPainter(
+                                                    stringCount:
+                                                        tab.stringCount,
+                                                    events: _timeline.events,
+                                                    measures:
+                                                        _timeline.measures,
+                                                    elapsedBeats: elapsed,
+                                                    pixelsPerBeat:
+                                                        _basePixelsPerBeat *
+                                                        _scale,
+                                                    playheadX: _playheadX,
+                                                    stringSpacing:
+                                                        stringSpacing,
+                                                    topPadding: topPadding,
+                                                    colorScheme:
+                                                        theme.colorScheme,
+                                                    textScale: textScale,
+                                                    sectionStartBeat:
+                                                        _isWholeSongSelected
+                                                        ? null
+                                                        : _loopStartBeat,
+                                                    sectionEndBeat:
+                                                        _isWholeSongSelected
+                                                        ? null
+                                                        : _sectionEndBeat,
+                                                    noteEvaluation:
+                                                        _noteFollowing
+                                                        ? null
+                                                        : _timedScorer
+                                                              .evaluationForNote,
+                                                  ),
                                                 ),
                                                 Positioned(
                                                   left: _playheadX,
@@ -976,6 +1127,7 @@ class _PracticeTrackPainter extends CustomPainter {
     required this.textScale,
     this.sectionStartBeat,
     this.sectionEndBeat,
+    this.noteEvaluation,
   });
 
   final int stringCount;
@@ -993,6 +1145,9 @@ class _PracticeTrackPainter extends CustomPainter {
   /// on the track, in beats, without the end-of-track padding.
   final double? sectionStartBeat;
   final double? sectionEndBeat;
+
+  /// Optional evaluation status lookup for scored timed practice mode.
+  final TimedNoteEvaluation Function(TimedNoteEvent)? noteEvaluation;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1073,17 +1228,31 @@ class _PracticeTrackPainter extends CustomPainter {
           elapsedBeats >= event.startBeat && elapsedBeats <= event.endBeat;
       final played = elapsedBeats > event.endBeat;
 
+      final evaluation =
+          noteEvaluation?.call(event) ?? TimedNoteEvaluation.neutral;
       final Color background;
       final Color foreground;
-      if (active) {
+      final Color borderColor;
+      if (evaluation == TimedNoteEvaluation.hit) {
+        background = const Color(0xFF2E7D32);
+        foreground = Colors.white;
+        borderColor = const Color(0xFF1B5E20);
+      } else if (evaluation == TimedNoteEvaluation.missed) {
+        background = const Color(0xFFC62828);
+        foreground = Colors.white;
+        borderColor = const Color(0xFFB71C1C);
+      } else if (active) {
         background = colorScheme.primary;
         foreground = colorScheme.onPrimary;
+        borderColor = colorScheme.primary;
       } else if (played) {
         background = colorScheme.surfaceContainerHighest.withValues(alpha: 0.5);
         foreground = colorScheme.onSurfaceVariant.withValues(alpha: 0.5);
+        borderColor = colorScheme.outlineVariant;
       } else {
         background = colorScheme.secondaryContainer;
         foreground = colorScheme.onSecondaryContainer;
+        borderColor = colorScheme.outlineVariant;
       }
 
       final width = (endX - startX).clamp(minNoteWidth, double.infinity);
@@ -1095,9 +1264,11 @@ class _PracticeTrackPainter extends CustomPainter {
       canvas.drawRRect(
         rect,
         Paint()
-          ..color = (active ? colorScheme.primary : colorScheme.outlineVariant)
+          ..color = borderColor
           ..style = PaintingStyle.stroke
-          ..strokeWidth = active ? 1.5 : 1,
+          ..strokeWidth = (active || evaluation != TimedNoteEvaluation.neutral)
+              ? 1.5
+              : 1,
       );
 
       textPainter.text = TextSpan(
@@ -1124,7 +1295,8 @@ class _PracticeTrackPainter extends CustomPainter {
       oldDelegate.sectionEndBeat != sectionEndBeat ||
       oldDelegate.colorScheme != colorScheme ||
       oldDelegate.stringSpacing != stringSpacing ||
-      oldDelegate.textScale != textScale;
+      oldDelegate.textScale != textScale ||
+      oldDelegate.noteEvaluation != noteEvaluation;
 }
 
 class _PracticeControls extends StatelessWidget {

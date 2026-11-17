@@ -34,7 +34,7 @@ class SqliteTabRepository implements TabRepository, AutomaticArtworkRepository {
     return _database ??= await _databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 6,
+        version: 7,
         onCreate: (db, version) async {
           await db.execute('''
           CREATE TABLE saved_tabs (
@@ -99,6 +99,9 @@ class SqliteTabRepository implements TabRepository, AutomaticArtworkRepository {
           }
           if (oldVersion < 6) {
             await SqlitePracticeSessionRepository.createSchema(db);
+          }
+          if (oldVersion < 7) {
+            await SqlitePracticeSessionRepository.migrateToVersion7(db);
           }
         },
       ),

@@ -23,9 +23,29 @@ class SqlitePracticeSessionRepository implements PracticeSessionRepository {
         start_measure INTEGER,
         end_measure INTEGER,
         marked_complete INTEGER NOT NULL,
-        confirmed_notes INTEGER NOT NULL
+        confirmed_notes INTEGER NOT NULL,
+        hits INTEGER,
+        misses INTEGER,
+        accuracy REAL
       )
     ''');
+  }
+
+  static Future<void> migrateToVersion7(Database db) async {
+    await createSchema(db);
+    final columns = await db.rawQuery('PRAGMA table_info(practice_history)');
+    final columnNames = columns.map((col) => col['name'] as String).toSet();
+    if (!columnNames.contains('hits')) {
+      await db.execute('ALTER TABLE practice_history ADD COLUMN hits INTEGER');
+    }
+    if (!columnNames.contains('misses')) {
+      await db.execute(
+        'ALTER TABLE practice_history ADD COLUMN misses INTEGER',
+      );
+    }
+    if (!columnNames.contains('accuracy')) {
+      await db.execute('ALTER TABLE practice_history ADD COLUMN accuracy REAL');
+    }
   }
 
   @override
