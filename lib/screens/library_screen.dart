@@ -477,15 +477,23 @@ class _LibraryScreenState extends State<LibraryScreen>
                       children: [
                         const Text(
                           'iCloud Drive · RiffShelf',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontWeight: FontWeight.w600),
                         ),
-                        Text(iCloudStatus, style: theme.textTheme.bodySmall),
+                        Text(
+                          iCloudStatus,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall,
+                        ),
                       ],
                     ),
                   ),
-                  TextButton(
+                  IconButton(
+                    tooltip: 'Sync now',
                     onPressed: iCloudSyncing ? null : syncICloud,
-                    child: Text(iCloudSyncing ? 'Syncing…' : 'Sync now'),
+                    icon: const Icon(Icons.sync),
                   ),
                 ],
               ),
