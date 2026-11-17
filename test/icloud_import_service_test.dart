@@ -33,8 +33,7 @@ void main() {
     )));
     final repo = SqliteTabRepository(databaseFactoryFfi, inMemoryDatabasePath);
     try {
-      const service = ICloudImportService;
-      final importer = service(source: source);
+      final importer = ICloudImportService(source: source);
       final first = await importer.sync(repo);
       expect(first.imported, 1);
       expect(first.duplicates, 0);
