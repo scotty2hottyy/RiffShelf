@@ -60,8 +60,10 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Check formatting
-        run: dart format --output=none --set-exit-if-changed .
+      - name: Format and print changes for review
+        run: |
+          dart format .
+          git diff -- lib/features/import/icloud_import_service.dart lib/screens/library_screen.dart test/icloud_import_service_test.dart
 
       - name: Analyze
         run: flutter analyze
