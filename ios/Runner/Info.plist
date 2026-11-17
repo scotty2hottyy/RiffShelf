@@ -16,6 +16,16 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<key>NSUbiquitousContainers</key>
+	<dict>
+		<key>iCloud.com.sonniersolution.riffshelf</key>
+		<dict>
+			<key>NSUbiquitousContainerIsDocumentScopePublic</key>
+			<true/>
+			<key>NSUbiquitousContainerName</key>
+			<string>RiffShelf</string>
+		</dict>
+	</dict>
 	<key>CFBundleName</key>
 	<string>riffshelf</string>
 	<key>CFBundlePackageType</key>
