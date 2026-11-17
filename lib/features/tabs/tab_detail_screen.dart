@@ -6,6 +6,8 @@ import '../../core/models/saved_tab.dart';
 import '../../core/database/tab_repository.dart';
 import '../../core/database/sqlite_tab_repository.dart';
 import '../artwork/album_art.dart';
+import '../artwork/album_picker_dialog.dart';
+import '../artwork/artwork_preferences.dart';
 import '../artwork/artwork_service.dart';
 import 'practice_preparation_screen.dart';
 import 'structured_tab_viewer.dart';
@@ -136,32 +138,13 @@ class _TabDetailScreenState extends State<TabDetailScreen> {
         target.title,
       );
       if (!mounted) return;
+      final showAllSetting = await ArtworkPreferences.getShowAllAlbumTypes();
+      if (!mounted) return;
       final selected = await showDialog<AlbumCandidate>(
         context: context,
-        builder: (context) => SimpleDialog(
-          title: const Text('Choose an album'),
-          children: candidates.isEmpty
-              ? [
-                  const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text(
-                      'No albums found. Try another search after checking the song and artist.',
-                    ),
-                  ),
-                  SimpleDialogOption(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Close'),
-                  ),
-                ]
-              : [
-                  for (final album in candidates)
-                    SimpleDialogOption(
-                      onPressed: () => Navigator.pop(context, album),
-                      child: Text(
-                        '${album.title} — ${album.artist} · ${album.date ?? 'Date unknown'}',
-                      ),
-                    ),
-                ],
+        builder: (context) => AlbumPickerDialog(
+          allCandidates: candidates,
+          initialShowAll: showAllSetting,
         ),
       );
       if (selected == null) return;

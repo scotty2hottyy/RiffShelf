@@ -12,9 +12,46 @@ import '../../core/database/tab_repository.dart';
 import '../../core/models/saved_tab.dart';
 
 class AlbumCandidate {
-  const AlbumCandidate(this.id, this.title, this.artist, this.date);
+  const AlbumCandidate(
+    this.id,
+    this.title,
+    this.artist,
+    this.date, {
+    this.releaseGroupId,
+    this.primaryType,
+    this.secondaryTypes = const <String>{},
+    this.isStudioAlbum = true,
+    this.alternateEditions = const <AlbumCandidate>[],
+  });
   final String id, title, artist;
   final String? date;
+  final String? releaseGroupId;
+  final String? primaryType;
+  final Set<String> secondaryTypes;
+  final bool isStudioAlbum;
+  final List<AlbumCandidate> alternateEditions;
+
+  AlbumCandidate copyWith({
+    String? id,
+    String? title,
+    String? artist,
+    String? date,
+    String? releaseGroupId,
+    String? primaryType,
+    Set<String>? secondaryTypes,
+    bool? isStudioAlbum,
+    List<AlbumCandidate>? alternateEditions,
+  }) => AlbumCandidate(
+    id ?? this.id,
+    title ?? this.title,
+    artist ?? this.artist,
+    date ?? this.date,
+    releaseGroupId: releaseGroupId ?? this.releaseGroupId,
+    primaryType: primaryType ?? this.primaryType,
+    secondaryTypes: secondaryTypes ?? this.secondaryTypes,
+    isStudioAlbum: isStudioAlbum ?? this.isStudioAlbum,
+    alternateEditions: alternateEditions ?? this.alternateEditions,
+  );
 }
 
 /// Serializes requests across app instances and spaces their starts by one second.
@@ -320,16 +357,22 @@ class ArtworkService {
           }
           final group = release['release-group'];
           final groupMap = group is Map ? group : const {};
-          final primary = '${groupMap['primary-type'] ?? ''}'.toLowerCase();
+          final rawPrimary = groupMap['primary-type'];
+          final primary = rawPrimary is String
+              ? rawPrimary.trim().toLowerCase()
+              : '';
           final secondary = groupMap['secondary-types'] is List
               ? (groupMap['secondary-types'] as List)
                     .whereType<String>()
-                    .map((value) => value.toLowerCase())
+                    .map((value) => value.trim().toLowerCase())
                     .toSet()
               : <String>{};
+          final releaseDisambiguation = release['disambiguation'];
+          final rawDisambiguation = raw['disambiguation'];
           final descriptor =
-              '${release['title']} ${raw['disambiguation'] ?? ''}'
+              '${release['title']} ${releaseDisambiguation is String ? releaseDisambiguation : ''} ${rawDisambiguation is String ? rawDisambiguation : ''}'
                   .toLowerCase();
+          final status = '${release['status'] ?? ''}'.trim().toLowerCase();
           final isLive =
               secondary.contains('live') ||
               RegExp(r'\blive\b').hasMatch(descriptor);
@@ -346,7 +389,7 @@ class ArtworkService {
           if (isCompilation) rank -= 700;
           if (isLive) rank -= 800;
           if (secondary.contains('remix')) rank -= 300;
-          if ('${release['status'] ?? ''}'.toLowerCase() == 'bootleg') {
+          if (status == 'bootleg') {
             rank -= 200;
           }
           final firstDate = groupMap['first-release-date'];
@@ -356,12 +399,27 @@ class ArtworkService {
               ? firstDate
               : date;
           final id = (release['id'] as String).toLowerCase();
+          final isStudio = isStudioRelease(
+            primaryType: rawPrimary is String ? rawPrimary : null,
+            secondaryTypes: secondary,
+            status: status.isEmpty ? null : status,
+            title: release['title'] as String,
+            disambiguation:
+                '${releaseDisambiguation is String ? releaseDisambiguation : ''} ${rawDisambiguation is String ? rawDisambiguation : ''}'
+                    .trim(),
+          );
           final candidate = _RankedAlbum(
             AlbumCandidate(
               id,
               (release['title'] as String).trim(),
               releaseArtist,
               date,
+              releaseGroupId: groupMap['id'] is String
+                  ? groupMap['id'] as String
+                  : null,
+              primaryType: rawPrimary is String ? rawPrimary : null,
+              secondaryTypes: secondary,
+              isStudioAlbum: isStudio,
             ),
             rank,
             groupDate,
@@ -377,6 +435,81 @@ class ArtworkService {
       final ranked = candidates.values.toList()..sort(_compareAlbums);
       return _RecordingLookup(ranked);
     });
+  }
+
+  static bool isStudioRelease({
+    String? primaryType,
+    Set<String> secondaryTypes = const {},
+    String? status,
+    String? title,
+    String? disambiguation,
+  }) {
+    final primary = (primaryType ?? '').trim().toLowerCase();
+    final secondaries = secondaryTypes
+        .map((s) => s.trim().toLowerCase())
+        .toSet();
+    final stat = (status ?? '').trim().toLowerCase();
+    final descriptor = '${title ?? ''} ${disambiguation ?? ''}'.toLowerCase();
+
+    // 1. Release status: bootlegs are hidden
+    if (stat == 'bootleg') return false;
+
+    // 2. Primary type: hide singles, EPs, and other non-album primary types
+    if (primary.isNotEmpty && primary != 'album') {
+      return false;
+    }
+
+    // 3. Secondary types: hide live, compilation, remix, bootleg, etc.
+    if (secondaries.contains('live') ||
+        secondaries.contains('compilation') ||
+        secondaries.contains('remix') ||
+        secondaries.contains('dj-mix') ||
+        secondaries.contains('bootleg') ||
+        secondaries.contains('mixtape/street') ||
+        secondaries.contains('demo')) {
+      return false;
+    }
+
+    // 4. Descriptor / text indicators (matches live, compilations, greatest hits, bootlegs, singles, EPs, remixes)
+    if (RegExp(r'\blive\b').hasMatch(descriptor)) return false;
+    if (RegExp(r'\b(greatest hits|best of|anthology|collection|compilation)\b')
+        .hasMatch(descriptor)) {
+      return false;
+    }
+    if (RegExp(r'\bbootleg\b').hasMatch(descriptor)) return false;
+    if (RegExp(r'\b(remix|remixes)\b').hasMatch(descriptor)) return false;
+    if (RegExp(r'\bsingle\b').hasMatch(descriptor)) return false;
+    if (RegExp(r'\bep\b').hasMatch(descriptor)) return false;
+
+    return true;
+  }
+
+  static List<AlbumCandidate> filterStudioAlbums(
+    List<AlbumCandidate> candidates,
+  ) => candidates.where((c) => c.isStudioAlbum).toList();
+
+  static List<AlbumCandidate> groupCandidates(List<AlbumCandidate> candidates) {
+    final groupIndex = <String, int>{};
+    final result = <AlbumCandidate>[];
+
+    for (final candidate in candidates) {
+      final groupId = candidate.releaseGroupId;
+      if (groupId == null || groupId.isEmpty) {
+        result.add(candidate);
+        continue;
+      }
+      final index = groupIndex[groupId];
+      if (index == null) {
+        groupIndex[groupId] = result.length;
+        result.add(candidate);
+      } else {
+        final existing = result[index];
+        result[index] = existing.copyWith(
+          alternateEditions: [...existing.alternateEditions, candidate],
+        );
+      }
+    }
+    return result;
   }
 
   static int _compareAlbums(_RankedAlbum a, _RankedAlbum b) {
@@ -651,34 +784,37 @@ class ArtworkService {
         cacheDirectory ??
         Directory(p.join(await getDatabasesPath(), 'artwork'));
     await dir.create(recursive: true);
-    final file = File(p.join(dir.path, '$id.img'));
+
     String? local;
     String? sourceUrl;
-    var cached = false;
-    if (await file.exists() &&
-        await file.length() > 0 &&
-        await file.length() <= 2000000) {
-      final bytes = await file.readAsBytes();
-      cached = _validImage(bytes) && await _decodable(bytes);
-    }
-    if (cached) {
-      local = file.path;
-      sourceUrl = 'https://coverartarchive.org/release/$id/front';
-    } else {
-      final key = file.path;
-      final job = _downloads.putIfAbsent(key, () => _fetchCover(id, file));
-      try {
-        final source = await job;
-        if (source.isNotEmpty) {
-          local = file.path;
-          sourceUrl = source;
+    String successfulId = id;
+
+    final primary = await _obtainCover(id, dir);
+    if (primary.$1 != null) {
+      local = primary.$1;
+      sourceUrl = primary.$2;
+      successfulId = id;
+    } else if (album.alternateEditions.isNotEmpty) {
+      for (final alt in album.alternateEditions) {
+        if (!_id.hasMatch(alt.id)) continue;
+        try {
+          final altCover = await _obtainCover(alt.id.toLowerCase(), dir);
+          if (altCover.$1 != null) {
+            local = altCover.$1;
+            sourceUrl = altCover.$2;
+            successfulId = alt.id.toLowerCase();
+            break;
+          }
+        } on ArtworkLookupException {
+          rethrow;
+        } catch (_) {
+          continue;
         }
-      } finally {
-        if (identical(_downloads[key], job)) _downloads.remove(key);
       }
     }
+
     return jsonEncode({
-      'release_id': id,
+      'release_id': successfulId,
       'title': album.title,
       'artist': album.artist,
       'date': album.date,
@@ -688,6 +824,34 @@ class ArtworkService {
       'attribution': null,
       'rights': null,
     });
+  }
+
+  Future<(String? local, String? sourceUrl)> _obtainCover(
+    String id,
+    Directory dir,
+  ) async {
+    final file = File(p.join(dir.path, '$id.img'));
+    var cached = false;
+    if (await file.exists() &&
+        await file.length() > 0 &&
+        await file.length() <= 2000000) {
+      final bytes = await file.readAsBytes();
+      cached = _validImage(bytes) && await _decodable(bytes);
+    }
+    if (cached) {
+      return (file.path, 'https://coverartarchive.org/release/$id/front');
+    }
+    final key = file.path;
+    final job = _downloads.putIfAbsent(key, () => _fetchCover(id, file));
+    try {
+      final source = await job;
+      if (source.isNotEmpty) {
+        return (file.path, source);
+      }
+      return (null, null);
+    } finally {
+      if (identical(_downloads[key], job)) _downloads.remove(key);
+    }
   }
 
   Future<String> _fetchCover(String id, File file) async {

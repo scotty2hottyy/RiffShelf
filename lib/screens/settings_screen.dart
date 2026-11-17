@@ -1,10 +1,23 @@
+import 'package:flutter/cupertino.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../core/theme_provider.dart';
+import '../features/artwork/artwork_preferences.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    ArtworkPreferences.getShowAllAlbumTypes();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -36,6 +49,39 @@ class SettingsScreen extends StatelessWidget {
                       themeProvider.setLightMode(value);
                     },
                     activeThumbColor: theme.colorScheme.primary,
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 24),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              'Album Artwork',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          _SettingsTile(
+            title: 'Show all album types',
+            subtitle: 'Include live albums, compilations, singles, and other releases',
+            trailing: ValueListenableBuilder<bool>(
+              valueListenable: ArtworkPreferences.showAllAlbumTypesNotifier,
+              builder: (context, showAll, child) {
+                return Semantics(
+                  label: 'Show all album types',
+                  child: SizedBox(
+                    width: 51,
+                    height: 31,
+                    child: CupertinoSwitch(
+                      value: showAll,
+                      onChanged: (value) {
+                        ArtworkPreferences.setShowAllAlbumTypes(value);
+                      },
+                      activeTrackColor: theme.colorScheme.primary,
+                    ),
                   ),
                 );
               },

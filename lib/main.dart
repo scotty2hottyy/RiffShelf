@@ -3,12 +3,14 @@ import 'package:provider/provider.dart';
 
 import 'app.dart';
 import 'core/theme_provider.dart';
+import 'features/artwork/artwork_preferences.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final themeProvider = ThemeProvider();
   await themeProvider.init();
+  await ArtworkPreferences.init();
 
   runApp(
     ChangeNotifierProvider(

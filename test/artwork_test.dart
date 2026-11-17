@@ -7,14 +7,21 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:provider/provider.dart';
 import 'package:riffshelf/core/database/sqlite_tab_repository.dart';
 import 'package:riffshelf/core/database/tab_repository.dart';
 import 'package:riffshelf/core/models/instrument_type.dart';
 import 'package:riffshelf/core/models/saved_tab.dart';
+import 'package:riffshelf/core/theme_provider.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:riffshelf/features/artwork/album_art.dart';
+import 'package:riffshelf/features/artwork/album_picker_dialog.dart';
+import 'package:riffshelf/features/artwork/artwork_preferences.dart';
 import 'package:riffshelf/features/artwork/artwork_service.dart';
 import 'package:riffshelf/features/tabs/tab_detail_screen.dart';
 import 'package:riffshelf/screens/library_screen.dart';
+import 'package:riffshelf/screens/settings_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 const id1 = 'a1ed26f7-3f11-4633-a3c7-4a4abfa3271f';
@@ -1226,4 +1233,570 @@ void main() {
       );
     },
   );
+
+  group('improved MusicBrainz album filtering and grouping', () {
+    test('filtering: regular studio albums are identified while non-studio types are hidden', () {
+      // Studio album with release-group classification
+      expect(
+        ArtworkService.isStudioRelease(
+          primaryType: 'Album',
+          secondaryTypes: {},
+          status: 'Official',
+          title: 'Paranoid',
+        ),
+        isTrue,
+      );
+
+      // Live album by secondary type
+      expect(
+        ArtworkService.isStudioRelease(
+          primaryType: 'Album',
+          secondaryTypes: {'Live'},
+          title: 'Live Evil',
+        ),
+        isFalse,
+      );
+
+      // Live album by descriptor
+      expect(
+        ArtworkService.isStudioRelease(
+          primaryType: 'Album',
+          title: 'Paranoid (Live in Paris)',
+        ),
+        isFalse,
+      );
+
+      // Compilation by secondary type
+      expect(
+        ArtworkService.isStudioRelease(
+          primaryType: 'Album',
+          secondaryTypes: {'Compilation'},
+          title: 'Greatest Hits',
+        ),
+        isFalse,
+      );
+
+      // Greatest hits / best of by title
+      expect(
+        ArtworkService.isStudioRelease(title: 'The Best of Black Sabbath'),
+        isFalse,
+      );
+      expect(ArtworkService.isStudioRelease(title: 'Greatest Hits'), isFalse);
+      expect(
+        ArtworkService.isStudioRelease(title: 'The Anthology Collection'),
+        isFalse,
+      );
+
+      // Bootleg by release status
+      expect(
+        ArtworkService.isStudioRelease(
+          status: 'bootleg',
+          title: 'Unreleased Sessions',
+        ),
+        isFalse,
+      );
+
+      // Bootleg by secondary type or title
+      expect(
+        ArtworkService.isStudioRelease(
+          secondaryTypes: {'bootleg'},
+          title: 'Rare Session',
+        ),
+        isFalse,
+      );
+      expect(
+        ArtworkService.isStudioRelease(title: 'Bootleg Recordings 1974'),
+        isFalse,
+      );
+
+      // Single by primary type
+      expect(
+        ArtworkService.isStudioRelease(
+          primaryType: 'Single',
+          title: 'Iron Man',
+        ),
+        isFalse,
+      );
+
+      // Single by title
+      expect(
+        ArtworkService.isStudioRelease(title: 'Iron Man - Single'),
+        isFalse,
+      );
+
+      // EP by primary type
+      expect(
+        ArtworkService.isStudioRelease(
+          primaryType: 'EP',
+          title: 'Jar of Flies',
+        ),
+        isFalse,
+      );
+
+      // EP by title
+      expect(ArtworkService.isStudioRelease(title: 'Jar of Flies EP'), isFalse);
+
+      // Remix by secondary type
+      expect(
+        ArtworkService.isStudioRelease(
+          secondaryTypes: {'Remix'},
+          title: 'Remixed Classics',
+        ),
+        isFalse,
+      );
+
+      // Remix by title
+      expect(
+        ArtworkService.isStudioRelease(title: 'Paranoid (2020 Remix)'),
+        isFalse,
+      );
+    });
+
+    test(
+      'filtering: missing metadata is not incorrectly classified as non-studio',
+      () {
+        // Release with no release-group information
+        expect(
+          ArtworkService.isStudioRelease(
+            primaryType: null,
+            secondaryTypes: {},
+            status: null,
+            title: 'Master of Reality',
+          ),
+          isTrue,
+        );
+
+        // Release with release-group having empty primary-type
+        expect(
+          ArtworkService.isStudioRelease(
+            primaryType: '',
+            secondaryTypes: {},
+            title: 'Sabotage',
+          ),
+          isTrue,
+        );
+
+        // But missing metadata with clear live/compilation indicator in title is still hidden
+        expect(
+          ArtworkService.isStudioRelease(
+            primaryType: null,
+            secondaryTypes: {},
+            title: 'Sabotage Live',
+          ),
+          isFalse,
+        );
+      },
+    );
+
+    test('filtering: MusicBrainz search populates classifications', () async {
+      const liveId = '00000000-0000-0000-0000-000000000004';
+      const compId = '00000000-0000-0000-0000-000000000003';
+      final service = serviceFor(
+        (_) => http.Response(
+          jsonEncode({
+            'count': 4,
+            'recordings': [
+              {
+                'title': 'Iron Man',
+                'score': 100,
+                'artist-credit': [
+                  {'name': 'Black Sabbath'},
+                ],
+                'releases': [
+                  {
+                    'id': id1,
+                    'title': 'Paranoid',
+                    'date': '1970-09-18',
+                    'release-group': {
+                      'id': 'rg-paranoid',
+                      'primary-type': 'Album',
+                      'first-release-date': '1970-09-18',
+                    },
+                  },
+                  {
+                    'id': id2,
+                    'title': 'Paranoid (Reissue)',
+                    'date': '2016',
+                    'release-group': {
+                      'id': 'rg-paranoid',
+                      'primary-type': 'Album',
+                      'first-release-date': '1970-09-18',
+                    },
+                  },
+                  {
+                    'id': liveId,
+                    'title': 'Live Evil',
+                    'date': '1982',
+                    'release-group': {
+                      'id': 'rg-live',
+                      'primary-type': 'Album',
+                      'secondary-types': ['Live'],
+                    },
+                  },
+                  {
+                    'id': compId,
+                    'title': 'Greatest Hits',
+                    'date': '1977',
+                    'release-group': {
+                      'id': 'rg-comp',
+                      'primary-type': 'Album',
+                      'secondary-types': ['Compilation'],
+                    },
+                  },
+                ],
+              },
+            ],
+          }),
+          200,
+        ),
+      );
+
+      final all = await service.candidates('Black Sabbath', 'Iron Man');
+      expect(all.length, 4);
+
+      final studio = ArtworkService.filterStudioAlbums(all);
+      expect(studio.length, 2);
+      expect(studio.map((a) => a.id).toList(), [id1, id2]);
+      expect(studio.every((a) => a.isStudioAlbum), isTrue);
+
+      final liveCandidate = all.firstWhere((a) => a.id == liveId);
+      expect(liveCandidate.isStudioAlbum, isFalse);
+      expect(liveCandidate.secondaryTypes, contains('live'));
+
+      final compCandidate = all.firstWhere((a) => a.id == compId);
+      expect(compCandidate.isStudioAlbum, isFalse);
+      expect(compCandidate.secondaryTypes, contains('compilation'));
+    });
+
+    test(
+      'duplicate grouping: collapses editions with same release-group ID',
+      () {
+        const candidate1 = AlbumCandidate(
+          id1,
+          'Paranoid',
+          'Black Sabbath',
+          '1970-09-18',
+          releaseGroupId: 'rg-paranoid',
+        );
+        const candidate2 = AlbumCandidate(
+          id2,
+          'Paranoid (Deluxe)',
+          'Black Sabbath',
+          '2016',
+          releaseGroupId: 'rg-paranoid',
+        );
+        const candidate3 = AlbumCandidate(
+          '00000000-0000-0000-0000-000000000005',
+          'Master of Reality',
+          'Black Sabbath',
+          '1971',
+          releaseGroupId: 'rg-master',
+        );
+
+        final grouped = ArtworkService.groupCandidates([
+          candidate1,
+          candidate2,
+          candidate3,
+        ]);
+
+        expect(grouped.length, 2);
+        expect(grouped[0].id, id1);
+        expect(grouped[0].alternateEditions.length, 1);
+        expect(grouped[0].alternateEditions.single.id, id2);
+        expect(grouped[1].id, candidate3.id);
+        expect(grouped[1].alternateEditions, isEmpty);
+      },
+    );
+
+    test(
+      'duplicate grouping: releases without release-group ID remain distinct',
+      () {
+        const candidate1 = AlbumCandidate(
+          id1,
+          'First Edition',
+          'Artist',
+          '2000',
+        );
+        const candidate2 = AlbumCandidate(
+          id2,
+          'Second Edition',
+          'Artist',
+          '2001',
+        );
+
+        final grouped = ArtworkService.groupCandidates([
+          candidate1,
+          candidate2,
+        ]);
+        expect(grouped.length, 2);
+        expect(grouped[0].id, id1);
+        expect(grouped[1].id, id2);
+      },
+    );
+
+    test(
+      'preserves access to alternate editions when obtaining artwork',
+      () async {
+        final requests = <Uri>[];
+        final service = serviceFor((request) {
+          requests.add(request.url);
+          // Primary release id1 returns 404 (no cover)
+          if (request.url.path.endsWith(id1)) {
+            return http.Response('', 404);
+          }
+          // Alternate edition id2 has front cover
+          if (request.url.path.endsWith(id2)) {
+            return http.Response(jsonEncode(cover()), 200);
+          }
+          return http.Response.bytes(
+            base64Decode(png),
+            200,
+            headers: {'content-type': 'image/png'},
+          );
+        });
+
+        const primary = AlbumCandidate(
+          id1,
+          'Paranoid',
+          'Black Sabbath',
+          '1970-09-18',
+          releaseGroupId: 'rg-paranoid',
+          alternateEditions: [
+            AlbumCandidate(
+              id2,
+              'Paranoid (Reissue)',
+              'Black Sabbath',
+              '2016',
+              releaseGroupId: 'rg-paranoid',
+            ),
+          ],
+        );
+
+        final metadata = jsonDecode(await service.select(primary)) as Map;
+        expect(metadata['local_path'], isNotNull);
+        expect(metadata['title'], 'Paranoid');
+        expect(metadata['artist'], 'Black Sabbath');
+        expect(metadata['release_id'], id2);
+        expect(requests.any((u) => u.path.endsWith(id1)), isTrue);
+        expect(requests.any((u) => u.path.endsWith(id2)), isTrue);
+      },
+    );
+
+    test(
+      'preferences: default is false, persists, and notifies listeners',
+      () async {
+        SharedPreferences.setMockInitialValues({});
+        final prefs = await SharedPreferences.getInstance();
+        await ArtworkPreferences.init(prefs);
+
+        // Default OFF
+        expect(ArtworkPreferences.showAllAlbumTypes, isFalse);
+        expect(await ArtworkPreferences.getShowAllAlbumTypes(prefs), isFalse);
+
+        // Turn ON
+        await ArtworkPreferences.setShowAllAlbumTypes(true, prefs);
+        expect(ArtworkPreferences.showAllAlbumTypes, isTrue);
+        expect(prefs.getBool(ArtworkPreferences.keyShowAllAlbumTypes), isTrue);
+
+        // Reset
+        ArtworkPreferences.resetForTesting();
+        expect(ArtworkPreferences.showAllAlbumTypes, isFalse);
+      },
+    );
+
+    testWidgets(
+      'settings: renders album artwork section and toggles preference',
+      (tester) async {
+        SharedPreferences.setMockInitialValues({});
+        final prefs = await SharedPreferences.getInstance();
+        await ArtworkPreferences.init(prefs);
+
+        final theme = ThemeProvider();
+        await theme.init();
+
+        await tester.pumpWidget(
+          ChangeNotifierProvider.value(
+            value: theme,
+            child: const MaterialApp(home: SettingsScreen()),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Album Artwork'), findsOneWidget);
+        expect(find.text('Show all album types'), findsOneWidget);
+
+        final toggleFinder = find.byType(CupertinoSwitch);
+        expect(toggleFinder, findsOneWidget);
+        expect(tester.widget<CupertinoSwitch>(toggleFinder).value, isFalse);
+
+        await tester.tap(toggleFinder);
+        await tester.pumpAndSettle();
+
+        expect(tester.widget<CupertinoSwitch>(toggleFinder).value, isTrue);
+        expect(ArtworkPreferences.showAllAlbumTypes, isTrue);
+        expect(prefs.getBool(ArtworkPreferences.keyShowAllAlbumTypes), isTrue);
+      },
+    );
+
+    testWidgets(
+      'album picker: filters to studio albums, groups editions, and temporary override reveals all releases',
+      (tester) async {
+        ArtworkPreferences.resetForTesting();
+
+        const candidate1 = AlbumCandidate(
+          id1,
+          'Paranoid',
+          'Black Sabbath',
+          '1970-09-18',
+          releaseGroupId: 'rg-paranoid',
+          isStudioAlbum: true,
+        );
+        const candidate2 = AlbumCandidate(
+          id2,
+          'Paranoid (Reissue)',
+          'Black Sabbath',
+          '2016',
+          releaseGroupId: 'rg-paranoid',
+          isStudioAlbum: true,
+        );
+        const liveCandidate = AlbumCandidate(
+          '00000000-0000-0000-0000-000000000004',
+          'Live Evil',
+          'Black Sabbath',
+          '1982',
+          releaseGroupId: 'rg-live',
+          isStudioAlbum: false,
+        );
+
+        AlbumCandidate? selected;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  onPressed: () async {
+                    selected = await showDialog<AlbumCandidate>(
+                      context: context,
+                      builder: (context) => const AlbumPickerDialog(
+                        allCandidates: [candidate1, candidate2, liveCandidate],
+                        initialShowAll: false,
+                      ),
+                    );
+                  },
+                  child: const Text('Open Picker'),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('Open Picker'));
+        await tester.pumpAndSettle();
+
+        // Under studio album filtering and grouping:
+        // Paranoid should be shown as 1 grouped result
+        expect(
+          find.textContaining('Paranoid — Black Sabbath · 1970-09-18'),
+          findsOneWidget,
+        );
+        // Alternate edition and Live Evil should be hidden
+        expect(find.textContaining('Paranoid (Reissue)'), findsNothing);
+        expect(find.textContaining('Live Evil'), findsNothing);
+
+        // Override button exists
+        expect(find.text('Show all releases'), findsOneWidget);
+
+        // Tap override to reveal all releases
+        await tester.tap(find.text('Show all releases'));
+        await tester.pumpAndSettle();
+
+        // Now all individual releases are visible
+        expect(
+          find.textContaining('Paranoid — Black Sabbath · 1970-09-18'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('Paranoid (Reissue)'), findsOneWidget);
+        expect(find.textContaining('Live Evil'), findsOneWidget);
+        expect(find.text('Studio albums only'), findsOneWidget);
+
+        // Can switch back to studio albums only
+        await tester.tap(find.text('Studio albums only'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Live Evil'), findsNothing);
+
+        // Selecting the grouped album returns it with alternate editions intact
+        await tester.tap(
+          find.textContaining('Paranoid — Black Sabbath · 1970-09-18'),
+        );
+        await tester.pumpAndSettle();
+
+        expect(selected, isNotNull);
+        expect(selected!.id, id1);
+        expect(selected!.alternateEditions.single.id, id2);
+      },
+    );
+
+    testWidgets(
+      'album picker: displays clear message when filtering produces no results and allows showing all releases',
+      (tester) async {
+        ArtworkPreferences.resetForTesting();
+
+        const liveOnly = AlbumCandidate(
+          '00000000-0000-0000-0000-000000000004',
+          'Live Evil',
+          'Black Sabbath',
+          '1982',
+          releaseGroupId: 'rg-live',
+          isStudioAlbum: false,
+        );
+
+        AlbumCandidate? selected;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  onPressed: () async {
+                    selected = await showDialog<AlbumCandidate>(
+                      context: context,
+                      builder: (context) => const AlbumPickerDialog(
+                        allCandidates: [liveOnly],
+                        initialShowAll: false,
+                      ),
+                    );
+                  },
+                  child: const Text('Open Picker'),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('Open Picker'));
+        await tester.pumpAndSettle();
+
+        // Filtering produces no results: clear message is displayed
+        expect(
+          find.text(
+            'No studio albums found. Try showing all releases, or check the song and artist.',
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('Show all releases'), findsOneWidget);
+
+        // Tap override to view the non-studio releases
+        await tester.tap(find.text('Show all releases'));
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('Live Evil'), findsOneWidget);
+
+        // Select the release
+        await tester.tap(find.textContaining('Live Evil'));
+        await tester.pumpAndSettle();
+
+        expect(selected, isNotNull);
+        expect(selected!.id, liveOnly.id);
+      },
+    );
+  });
 }
