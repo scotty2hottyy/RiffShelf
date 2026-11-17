@@ -11,6 +11,7 @@ import '../core/models/instrument_type.dart';
 import '../core/models/tuning.dart';
 import '../features/library/edit_tab_screen.dart';
 import '../features/import/tab_import_service.dart';
+import '../features/import/icloud_import_service.dart';
 import '../features/import/guitar_pro_importer.dart';
 import '../features/tabs/tab_detail_screen.dart';
 import '../features/artwork/album_art.dart';
@@ -40,11 +41,16 @@ class LibraryScreen extends StatefulWidget {
   State<LibraryScreen> createState() => _LibraryScreenState();
 }
 
-class _LibraryScreenState extends State<LibraryScreen> {
+class _LibraryScreenState extends State<LibraryScreen> with WidgetsBindingObserver {
   late final TabRepository repository =
       widget.repository ?? SqliteTabRepository.local();
   late Future<List<SavedTab>> tabs = repository.findTabs();
   final importer = const TabImportService();
+  final iCloudService = const ICloudImportService(
+    source: NativeICloudFileSource(),
+  );
+  bool iCloudSyncing = false;
+  String iCloudStatus = 'Checking iCloud Drive…';
   final search = TextEditingController();
   final filterCount = TextEditingController();
   final filterTuning = TextEditingController();
@@ -75,13 +81,50 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) syncICloud();
+    });
     if (repository is SqliteTabRepository) {
       SqliteTabRepository.changes.addListener(refresh);
     }
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) syncICloud();
+  }
+
+  Future<void> syncICloud() async {
+    if (iCloudSyncing) return;
+    setState(() {
+      iCloudSyncing = true;
+      iCloudStatus = 'Scanning iCloud Drive…';
+    });
+    try {
+      final report = await iCloudService.sync(repository);
+      if (!mounted) return;
+      setState(() => iCloudStatus = report.description);
+      if (report.imported > 0) refresh();
+    } on MissingPluginException {
+      if (!mounted) return;
+      setState(() => iCloudStatus = 'iCloud Drive is available on iOS; manual import works here.');
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      setState(
+        () => iCloudStatus = error.message ?? 'iCloud Drive is unavailable.',
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => iCloudStatus = 'iCloud scan failed. Tap Sync now to retry.');
+    } finally {
+      if (mounted) setState(() => iCloudSyncing = false);
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     if (repository is SqliteTabRepository) {
       SqliteTabRepository.changes.removeListener(refresh);
     }
@@ -412,6 +455,34 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 label: const Text('Import Tab'),
               ),
             ],
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  const Icon(Icons.cloud_outlined),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'iCloud Drive · RiffShelf',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        Text(iCloudStatus, style: theme.textTheme.bodySmall),
+                      ],
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: iCloudSyncing ? null : syncICloud,
+                    child: Text(iCloudSyncing ? 'Syncing…' : 'Sync now'),
+                  ),
+                ],
+              ),
+            ),
           ),
           const SizedBox(height: 16),
           Row(
