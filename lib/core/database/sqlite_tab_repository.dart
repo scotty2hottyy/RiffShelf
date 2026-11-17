@@ -7,6 +7,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/saved_tab.dart';
 import '../models/tuning.dart';
+import 'sqlite_practice_session_repository.dart';
 import 'tab_repository.dart';
 
 class SqliteTabRepository implements TabRepository, AutomaticArtworkRepository {
@@ -23,6 +24,9 @@ class SqliteTabRepository implements TabRepository, AutomaticArtworkRepository {
 
   Future<Database> get _db => _opening ??= _open();
 
+  /// Public accessor for the database, used by dependent repositories.
+  Future<Database> get database => _db;
+
   Future<Database> _open() async {
     final path =
         _databasePath ??
@@ -30,7 +34,7 @@ class SqliteTabRepository implements TabRepository, AutomaticArtworkRepository {
     return _database ??= await _databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 4,
+        version: 6,
         onCreate: (db, version) async {
           await db.execute('''
           CREATE TABLE saved_tabs (
@@ -68,6 +72,7 @@ class SqliteTabRepository implements TabRepository, AutomaticArtworkRepository {
           await db.execute(
             'CREATE UNIQUE INDEX saved_tabs_import_key ON saved_tabs(import_key)',
           );
+          await SqlitePracticeSessionRepository.createSchema(db);
         },
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
@@ -91,6 +96,9 @@ class SqliteTabRepository implements TabRepository, AutomaticArtworkRepository {
           }
           if (oldVersion < 4) {
             await db.execute('ALTER TABLE saved_tabs ADD COLUMN artwork TEXT');
+          }
+          if (oldVersion < 6) {
+            await SqlitePracticeSessionRepository.createSchema(db);
           }
         },
       ),

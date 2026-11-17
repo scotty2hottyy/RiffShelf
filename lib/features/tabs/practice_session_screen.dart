@@ -4,6 +4,9 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/database/practice_session_repository.dart';
+import '../../core/database/sqlite_practice_session_repository.dart';
+import '../../core/models/practice_session.dart';
 import '../../core/models/saved_tab.dart';
 import '../../core/models/tab_structure.dart';
 import '../tuner/audio_input.dart';
@@ -24,9 +27,13 @@ class PracticeSessionScreen extends StatefulWidget {
     super.key,
     required this.tab,
     this.inputFactory,
+    this.historyRepository,
+    this.practiceStopwatch,
   });
   final TunerAudioInput Function()? inputFactory;
   final SavedTab tab;
+  final PracticeSessionRepository? historyRepository;
+  final Stopwatch? practiceStopwatch;
 
   @override
   State<PracticeSessionScreen> createState() => _PracticeSessionScreenState();
@@ -50,6 +57,12 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
   Duration _lastTick = Duration.zero;
   bool _playing = false;
   bool _noteFollowing = false;
+  late final Stopwatch _practiceTime = widget.practiceStopwatch ?? Stopwatch();
+  int _confirmedNotes = 0;
+  bool _hasPracticed = false;
+  bool _savingSession = false;
+  late final PracticeSessionRepository _history =
+      widget.historyRepository ?? SqlitePracticeSessionRepository.local();
   TunerController? _microphone;
   Timer? _noteTimeout;
   String? _followFeedback;
@@ -130,6 +143,7 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _practiceTime.stop();
     _noteTimeout?.cancel();
     _microphone?.removeListener(_onMicrophoneStatus);
     _microphone?.dispose();
@@ -193,7 +207,7 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
   }
 
   void _play() {
-    if (_playing || _timeline.events.isEmpty) return;
+    if (_playing || _savingSession || _timeline.events.isEmpty) return;
     if (_noteFollowing) {
       _startFollowing();
       return;
@@ -205,12 +219,15 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
     }
     _lastTick = Duration.zero;
     _ticker.start();
+    _practiceTime.start();
+    _hasPracticed = true;
     setState(() => _playing = true);
   }
 
   void _pause() {
     if (!_playing) return;
     _ticker.stop();
+    _practiceTime.stop();
     setState(() => _playing = false);
     if (_noteFollowing) {
       _noteTimeout?.cancel();
@@ -227,9 +244,8 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
       setState(_clearFollowFeedback);
       return;
     }
-    _ticker.stop();
+    _pause();
     _elapsedBeats.value = _loopStartBeat;
-    if (_playing) setState(() => _playing = false);
   }
 
   void _toggleLoop() {
@@ -283,7 +299,9 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
     setState(() {
       _clearFollowFeedback();
       _playing = true;
+      _hasPracticed = true;
     });
+    _practiceTime.start();
     unawaited(microphone.start());
   }
 
@@ -325,6 +343,7 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
     if (!mounted || !_noteFollowing || !_playing) return;
     final result = _progression.observe(pitch);
     if (result.matchedEvent case final matched?) {
+      _confirmedNotes++;
       _elapsedBeats.value = result.positionBeats;
       final note = nearestNote(frequencyFromMidi(matched.expectedMidiPitch!))
           .label;
@@ -374,6 +393,81 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
   }
 
   void _toggleMetronome() => setState(() => _metronome = !_metronome);
+
+  Future<void> _saveSession() async {
+    if (_savingSession || !_hasPracticed) return;
+    _pause();
+    var markedComplete = false;
+    final save = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Save practice session?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Practice time and confirmed notes are stored on this device. '
+                'The selected section is recorded as it is now.',
+              ),
+              CheckboxListTile(
+                value: markedComplete,
+                title: const Text('Mark selected section as completed'),
+                onChanged: (value) => update(() => markedComplete = value!),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (save != true || !mounted) return;
+    setState(() => _savingSession = true);
+    final startIndex = _sectionIndexRange.start.round();
+    final endIndex = _sectionIndexRange.end.round();
+    final session = PracticeSession(
+      title: widget.tab.title,
+      artist: widget.tab.artist,
+      savedAt: DateTime.now(),
+      durationMilliseconds: _practiceTime.elapsedMilliseconds,
+      startMeasure: _measureCount == 0
+          ? null
+          : _timeline.measures[startIndex].number,
+      endMeasure: _measureCount == 0
+          ? null
+          : _timeline.measures[endIndex].number,
+      markedComplete: markedComplete,
+      confirmedNotes: _confirmedNotes,
+    );
+    try {
+      await _history.save(session);
+      _practiceTime.reset();
+      _confirmedNotes = 0;
+      _hasPracticed = false;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Practice session saved locally.')),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save practice session.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingSession = false);
+    }
+  }
 
   void _onSpeedChanged(double value) => setState(() => _speedPercent = value);
 
@@ -425,7 +519,17 @@ class _PracticeSessionScreenState extends State<PracticeSessionScreen>
     final topPadding = _topPadding * textScale;
     final trackHeight = topPadding * 2 + (tab.stringCount - 1) * stringSpacing;
     return Scaffold(
-      appBar: AppBar(title: Text('Practice · ${tab.title}')),
+      appBar: AppBar(
+        title: Text('Practice · ${tab.title}'),
+        actions: [
+          IconButton(
+            key: const ValueKey('save-practice-session'),
+            onPressed: _hasPracticed && !_savingSession ? _saveSession : null,
+            tooltip: 'Save session',
+            icon: const Icon(Icons.save_outlined),
+          ),
+        ],
+      ),
       body: _timeline.events.isEmpty
           ? _StaticPracticeTab(tab: tab)
           : LayoutBuilder(
