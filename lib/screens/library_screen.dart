@@ -42,7 +42,8 @@ class LibraryScreen extends StatefulWidget {
   State<LibraryScreen> createState() => _LibraryScreenState();
 }
 
-class _LibraryScreenState extends State<LibraryScreen> with WidgetsBindingObserver {
+class _LibraryScreenState extends State<LibraryScreen>
+    with WidgetsBindingObserver {
   late final TabRepository repository =
       widget.repository ?? SqliteTabRepository.local();
   late Future<List<SavedTab>> tabs = repository.findTabs();
@@ -109,7 +110,10 @@ class _LibraryScreenState extends State<LibraryScreen> with WidgetsBindingObserv
       if (report.imported > 0) refresh();
     } on MissingPluginException {
       if (!mounted) return;
-      setState(() => iCloudStatus = 'iCloud Drive is available on iOS; manual import works here.');
+      setState(
+        () => iCloudStatus =
+            'iCloud Drive is available on iOS; manual import works here.',
+      );
     } on PlatformException catch (error) {
       if (!mounted) return;
       setState(
@@ -117,7 +121,9 @@ class _LibraryScreenState extends State<LibraryScreen> with WidgetsBindingObserv
       );
     } catch (_) {
       if (!mounted) return;
-      setState(() => iCloudStatus = 'iCloud scan failed. Tap Sync now to retry.');
+      setState(
+        () => iCloudStatus = 'iCloud scan failed. Tap Sync now to retry.',
+      );
     } finally {
       if (mounted) setState(() => iCloudSyncing = false);
     }

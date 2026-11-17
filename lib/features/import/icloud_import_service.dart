@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/services.dart';
 
 import '../../core/database/tab_repository.dart';
@@ -29,16 +27,18 @@ class NativeICloudFileSource implements ICloudFileSource {
     return [
       for (final entry in entries)
         if (entry['name'] is String && entry['path'] is String)
-          ICloudTabFile(name: entry['name'] as String, path: entry['path'] as String),
+          ICloudTabFile(
+            name: entry['name'] as String,
+            path: entry['path'] as String,
+          ),
     ];
   }
 
   @override
   Future<Uint8List> read(ICloudTabFile file) async {
-    final bytes = await _channel.invokeMethod<Uint8List>(
-      'read',
-      {'path': file.path},
-    );
+    final bytes = await _channel.invokeMethod<Uint8List>('read', {
+      'path': file.path,
+    });
     if (bytes == null) throw const FormatException('iCloud file was empty.');
     return bytes;
   }
@@ -106,11 +106,13 @@ class ICloudImportService {
           final document = importer.parseGuitarPro(bytes);
           for (final track in document.tracks) {
             try {
-              final tab = importer.convertTrack(document, track.index, file.name);
+              final tab = importer.convertTrack(
+                document,
+                track.index,
+                file.name,
+              );
               final saved = await repository.save(
-                tab.copyWith(
-                  importKey: importer.importKey(bytes, track.index),
-                ),
+                tab.copyWith(importKey: importer.importKey(bytes, track.index)),
               );
               ArtworkService.scheduleAutomatic(repository, saved);
               imported++;
