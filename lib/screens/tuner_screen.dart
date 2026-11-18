@@ -191,6 +191,22 @@ class _TunerScreenState extends State<TunerScreen> with WidgetsBindingObserver {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              ListenableBuilder(
+                listenable: _controller,
+                builder: (context, _) => _MeterCard(controller: _controller),
+              ),
+              const SizedBox(height: 16),
+              ListenableBuilder(
+                listenable: _controller,
+                builder: (context, _) =>
+                    _StatusMessage(controller: _controller),
+              ),
+              const SizedBox(height: 8),
+              ListenableBuilder(
+                listenable: _controller,
+                builder: (context, _) => _ActionButton(controller: _controller),
+              ),
+              const SizedBox(height: 16),
               if (widget.preset == null)
                 ListenableBuilder(
                   listenable: _controller,
@@ -207,22 +223,6 @@ class _TunerScreenState extends State<TunerScreen> with WidgetsBindingObserver {
                 )
               else
                 Text(widget.preset!.name),
-              const SizedBox(height: 20),
-              ListenableBuilder(
-                listenable: _controller,
-                builder: (context, _) => _MeterCard(controller: _controller),
-              ),
-              const SizedBox(height: 16),
-              ListenableBuilder(
-                listenable: _controller,
-                builder: (context, _) =>
-                    _StatusMessage(controller: _controller),
-              ),
-              const SizedBox(height: 8),
-              ListenableBuilder(
-                listenable: _controller,
-                builder: (context, _) => _ActionButton(controller: _controller),
-              ),
             ],
           ),
         ),
@@ -261,41 +261,80 @@ class _PresetPicker extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(
-          spacing: 8,
+        Row(
           children: [
-            for (final type in TunerInstrument.values)
-              ChoiceChip(
-                label: Text(type.label),
-                selected: instrument == type,
-                onSelected: (_) {
+            const SizedBox(width: 100, child: Text('Instrument')),
+            Expanded(
+              child: DropdownButton<TunerInstrument>(
+                key: const Key('tuner-instrument-selector'),
+                value: instrument,
+                isExpanded: true,
+                items: [
+                  for (final type in TunerInstrument.values)
+                    DropdownMenuItem(
+                      value: type,
+                      child: Text(type.label, overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: (type) {
+                  if (type == null) return;
                   final preset = _standardPresetFor(type);
                   onSelect(preset, builtInId(preset));
                 },
               ),
+            ),
           ],
         ),
         const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        Row(
           children: [
-            for (final preset in TunerPresets.all)
-              if (preset.instrument == instrument)
-                ChoiceChip(
-                  label: Text(preset.name),
-                  selected: identical(preset, controller.preset),
-                  onSelected: (_) => onSelect(preset, builtInId(preset)),
-                ),
-            for (final custom in customTunings)
-              if (custom.preset.instrument == instrument)
-                ChoiceChip(
-                  label: Text(custom.preset.name),
-                  selected: custom.id == selectedId,
-                  onSelected: (_) => onSelect(custom.preset, custom.id),
-                ),
+            const SizedBox(width: 100, child: Text('Tuning')),
+            Expanded(
+              child: DropdownButton<String>(
+                key: const Key('tuner-tuning-selector'),
+                value: selectedCustom?.id ?? builtInId(controller.preset),
+                isExpanded: true,
+                items: [
+                  for (final preset in TunerPresets.all)
+                    if (preset.instrument == instrument)
+                      DropdownMenuItem(
+                        value: builtInId(preset),
+                        child: Text(
+                          preset.name,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  for (final custom in customTunings)
+                    if (custom.preset.instrument == instrument)
+                      DropdownMenuItem(
+                        value: custom.id,
+                        child: Text(
+                          custom.preset.name,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                ],
+                onChanged: (id) {
+                  if (id == null) return;
+                  for (final preset in TunerPresets.all) {
+                    if (preset.instrument == instrument &&
+                        builtInId(preset) == id) {
+                      onSelect(preset, id);
+                      return;
+                    }
+                  }
+                  for (final custom in customTunings) {
+                    if (custom.id == id) {
+                      onSelect(custom.preset, id);
+                      return;
+                    }
+                  }
+                },
+              ),
+            ),
           ],
         ),
+        const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           children: [

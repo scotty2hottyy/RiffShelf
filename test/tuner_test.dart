@@ -596,7 +596,13 @@ void main() {
       );
       await show();
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Bass').first);
+      final instrumentSelector = find.byKey(
+        const Key('tuner-instrument-selector'),
+      );
+      await tester.ensureVisible(instrumentSelector);
+      await tester.tap(instrumentSelector);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Bass').last);
       await tester.pump();
       expect(find.byKey(const Key('tuner-string-0-E1')), findsOneWidget);
       expect(
@@ -634,6 +640,7 @@ void main() {
       );
       await show();
       await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('New tuning'));
       await tester.tap(find.text('New tuning'));
       await tester.pumpAndSettle();
       await tester.enterText(
@@ -647,6 +654,7 @@ void main() {
       expect(store.settings.customTunings.single.preset.notes.first, 'D2');
       expect(find.text('Edit tuning'), findsOneWidget);
 
+      await tester.ensureVisible(find.text('Edit tuning'));
       await tester.tap(find.text('Edit tuning'));
       await tester.pumpAndSettle();
       await tester.enterText(
@@ -662,6 +670,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Open variation'), findsOneWidget);
       expect(find.byKey(const Key('tuner-string-0-D2')), findsOneWidget);
+      await tester.ensureVisible(find.text('Delete tuning'));
       await tester.tap(find.text('Delete tuning'));
       await tester.pumpAndSettle();
       expect(store.settings.customTunings, isEmpty);
@@ -681,6 +690,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('New tuning'));
       await tester.tap(find.text('New tuning'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('tuning-note-0')), 'H9');
