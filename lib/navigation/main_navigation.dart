@@ -27,6 +27,12 @@ class _MainNavigationState extends State<MainNavigation> with RestorationMixin {
       screen: DiscoverScreen(),
     ),
     _NavigationDestination(
+      label: 'Library',
+      icon: Icons.library_music_outlined,
+      selectedIcon: Icons.library_music,
+      screen: LibraryScreen(),
+    ),
+    _NavigationDestination(
       label: 'Practice',
       icon: Icons.music_note_outlined,
       selectedIcon: Icons.music_note,
@@ -37,12 +43,6 @@ class _MainNavigationState extends State<MainNavigation> with RestorationMixin {
       icon: Icons.tune_outlined,
       selectedIcon: Icons.tune,
       screen: TunerScreen(),
-    ),
-    _NavigationDestination(
-      label: 'Library',
-      icon: Icons.library_music_outlined,
-      selectedIcon: Icons.library_music,
-      screen: LibraryScreen(),
     ),
     _NavigationDestination(
       label: 'Settings',

@@ -422,19 +422,13 @@ void main() {
       (tester) async {
         final input = FakeInput(MicrophoneStatus.available);
         await pumpTuner(tester, input);
-        InstrumentStringPainter illustration() =>
-            tester
-                    .widget<CustomPaint>(
-                      find.byKey(const Key('tuner-instrument-illustration')),
-                    )
-                    .painter!
-                as InstrumentStringPainter;
-        expect(illustration().stringCount, 6);
-        expect(illustration().activeStrings, isEmpty);
         await tester.ensureVisible(find.byKey(const Key('tuner-string-5-E4')));
         await tester.tap(find.byKey(const Key('tuner-string-5-E4')));
         await tester.pump();
-        expect(illustration().activeStrings, {5});
+        expect(
+          tester.widget<Text>(find.byKey(const Key('tuner-target-note'))).data,
+          'E4',
+        );
         await tester.ensureVisible(find.byKey(const Key('tuner-automatic')));
         await tester.tap(find.byKey(const Key('tuner-automatic')));
         await tester.ensureVisible(find.text('Start tuning'));
@@ -444,7 +438,10 @@ void main() {
         emitPitch(input, pitch.toDouble());
         emitPitch(input, pitch.toDouble());
         await tester.pump();
-        expect(illustration().activeStrings, {1});
+        expect(
+          tester.widget<Text>(find.byKey(const Key('tuner-target-note'))).data,
+          'A2',
+        );
         final dial =
             tester
                     .widget<CustomPaint>(
@@ -491,7 +488,7 @@ void main() {
           );
           await tester.pumpAndSettle();
           await tester.ensureVisible(
-            find.byKey(const Key('tuner-instrument-illustration')),
+            find.byKey(const Key('tuner-string-0-E2')),
           );
           await tester.pumpAndSettle();
           expect(find.byKey(const Key('tuner-cents-dial')), findsOneWidget);
@@ -606,14 +603,12 @@ void main() {
       await tester.pump();
       expect(find.byKey(const Key('tuner-string-0-E1')), findsOneWidget);
       expect(
-        (tester
-                    .widget<CustomPaint>(
-                      find.byKey(const Key('tuner-instrument-illustration')),
-                    )
-                    .painter!
-                as InstrumentStringPainter)
-            .isBass,
-        isTrue,
+        tester
+            .widget<DropdownButton<TunerInstrument>>(
+              find.byKey(const Key('tuner-instrument-selector')),
+            )
+            .value,
+        TunerInstrument.bass,
       );
       expect(find.byKey(const Key('tuner-string-5-E4')), findsNothing);
       expect(store.settings.selectedId, contains('bass'));
@@ -767,16 +762,6 @@ void main() {
       expect(find.byKey(const Key('tuner-string-0-E2')), findsOneWidget);
       expect(find.byKey(const Key('tuner-string-1-E2')), findsOneWidget);
       expect(find.byKey(const Key('tuner-string-11-E4')), findsOneWidget);
-      expect(
-        (tester
-                    .widget<CustomPaint>(
-                      find.byKey(const Key('tuner-instrument-illustration')),
-                    )
-                    .painter!
-                as InstrumentStringPainter)
-            .stringCount,
-        12,
-      );
       expect(tester.takeException(), isNull);
     });
   });

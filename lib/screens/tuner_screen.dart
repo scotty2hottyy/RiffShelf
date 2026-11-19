@@ -531,7 +531,7 @@ class _MeterCard extends StatelessWidget {
               : const Color(0xFFA33612));
 
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: theme.brightness == Brightness.dark
             ? const Color(0xFF101B1E)
@@ -547,7 +547,7 @@ class _MeterCard extends StatelessWidget {
                       (hasStrings ? '--' : controller.preset.notes.first)
                 : controller.preset.notes[controller.selectedStringIndex!],
             key: const Key('tuner-target-note'),
-            style: theme.textTheme.displayLarge?.copyWith(
+            style: theme.textTheme.headlineLarge?.copyWith(
               color: color,
               fontWeight: FontWeight.w700,
             ),
@@ -564,12 +564,12 @@ class _MeterCard extends StatelessWidget {
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
           Semantics(
             label: 'Tuning scale, minus 20 to plus 20 cents',
             child: LayoutBuilder(
               builder: (context, constraints) => SizedBox(
-                height: (constraints.maxWidth * 0.60).clamp(145.0, 240.0),
+                height: (constraints.maxWidth * 0.40).clamp(98.0, 160.0),
                 width: double.infinity,
                 child: CustomPaint(
                   key: const Key('tuner-cents-dial'),
@@ -607,45 +607,15 @@ class _MeterCard extends StatelessWidget {
               Text('Sharp', style: theme.textTheme.labelSmall),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 8),
           if (controller.selectedStringIndex != null)
             TextButton(
               key: const Key('tuner-automatic'),
               onPressed: () => controller.selectString(null),
               child: const Text('Automatic detection'),
             ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           if (hasStrings) ...[
-            Semantics(
-              label:
-                  '${controller.preset.instrument.label} illustration, ${controller.preset.stringCount} strings',
-              child: SizedBox(
-                height: 112,
-                width: double.infinity,
-                child: CustomPaint(
-                  key: const Key('tuner-instrument-illustration'),
-                  painter: InstrumentStringPainter(
-                    stringCount: controller.preset.notes.length,
-                    isBass:
-                        controller.preset.instrument == TunerInstrument.bass,
-                    activeStrings: {
-                      for (var i = 0; i < controller.preset.notes.length; i++)
-                        if (controller.selectedStringIndex == i ||
-                            (controller.selectedStringIndex == null &&
-                                reading?.targetNote ==
-                                    controller.preset.notes[i]))
-                          i,
-                    },
-                    accent: accent,
-                    outline: theme.colorScheme.onSurfaceVariant,
-                    surface: theme.brightness == Brightness.dark
-                        ? const Color(0xFF17292C)
-                        : const Color(0xFFE2EEEA),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
             LayoutBuilder(
               builder: (context, constraints) {
                 final notes = controller.preset.notes;
