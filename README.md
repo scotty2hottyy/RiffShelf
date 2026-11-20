@@ -47,6 +47,10 @@ flutter analyze
 flutter test
 ```
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch, commit, and pull request workflow, and [docs/testing.md](docs/testing.md) for how to run each kind of test.
+
 ## Practice timing compatibility
 
 Timed practice uses structured measure and note data from supported guitar and bass arrangements, including imported GP3, GP4, GP5, and GPX tracks. It supports four, five, six, and other positive string counts, alternate tunings, simultaneous notes, rests, sustained note durations, variable time signatures, speed changes, seeking, and measure-section loops. Notes scroll from right to left. The authored BPM sets the normal speed; tabs without BPM use a 100 BPM practice reference.
