@@ -2,6 +2,7 @@ import '../tuner/pitch_detector.dart' show PitchResult;
 import 'note_matcher.dart';
 import 'practice_timeline.dart';
 
+/// Why note-by-note mode skips a passage instead of waiting for it.
 enum UnsupportedPassageReason {
   chord,
   overlappingNotes,
@@ -10,6 +11,7 @@ enum UnsupportedPassageReason {
   technique,
 }
 
+/// Consecutive notes that note-by-note mode cannot match, and why.
 class SkippedPracticePassage {
   const SkippedPracticePassage({required this.notes, required this.reason});
   final List<TimedNoteEvent> notes;
@@ -17,6 +19,9 @@ class SkippedPracticePassage {
   double get startBeat => notes.first.startBeat;
 }
 
+/// Outcome of one [PracticeProgressionController.observe] call.
+///
+/// [looped] is true when the section finished and restarted.
 class PracticeProgressionResult {
   const PracticeProgressionResult({
     required this.positionBeats,
