@@ -47,6 +47,15 @@ flutter analyze
 flutter test
 ```
 
+To run the offline on-device tests, start an emulator or simulator and run:
+
+```sh
+flutter test integration_test/app_smoke_test.dart -d <device-id>
+flutter test integration_test/storage_on_device_test.dart -d <device-id>
+```
+
+See [docs/testing.md](docs/testing.md) for every test type and what CI runs.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch, commit, and pull request workflow, and [docs/testing.md](docs/testing.md) for how to run each kind of test.
