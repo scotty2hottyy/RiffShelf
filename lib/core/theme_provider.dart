@@ -1,25 +1,34 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// Holds the light/dark theme choice and builds the matching [ThemeData].
+///
+/// The choice is saved in [SharedPreferences]. `main.dart` calls [init] at
+/// startup to load it; [setLightMode] also works if [init] was never called.
 class ThemeProvider extends ChangeNotifier {
   static const String _themeKey = 'app_theme_mode';
   bool _isLightMode = false;
-  late SharedPreferences _prefs;
+  SharedPreferences? _prefs;
 
   bool get isLightMode => _isLightMode;
 
+  /// Loads the saved preference. Defaults to dark mode.
   Future<void> init() async {
-    _prefs = await SharedPreferences.getInstance();
-    _isLightMode = _prefs.getBool(_themeKey) ?? false;
+    final prefs = _prefs ??= await SharedPreferences.getInstance();
+    _isLightMode = prefs.getBool(_themeKey) ?? false;
     notifyListeners();
   }
 
+  /// Switches theme, saves the choice, and rebuilds listeners.
   Future<void> setLightMode(bool lightMode) async {
     _isLightMode = lightMode;
-    await _prefs.setBool(_themeKey, lightMode);
+    final prefs = _prefs ??= await SharedPreferences.getInstance();
+    await prefs.setBool(_themeKey, lightMode);
     notifyListeners();
   }
 
+  /// Returns the light theme or the default near-black theme with teal
+  /// accents.
   ThemeData getTheme(bool isLight) {
     const accentColor = Color(0xFF54E8D5);
     const backgroundColor = Color(0xFF071013);

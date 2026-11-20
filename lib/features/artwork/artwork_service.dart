@@ -11,6 +11,10 @@ import 'package:sqflite/sqflite.dart';
 import '../../core/database/tab_repository.dart';
 import '../../core/models/saved_tab.dart';
 
+/// A MusicBrainz release the user can choose as a tab's album.
+///
+/// [alternateEditions] groups other releases of the same album (such as
+/// remasters) so the picker can show one entry per album.
 class AlbumCandidate {
   const AlbumCandidate(
     this.id,
@@ -85,6 +89,8 @@ class MusicBrainzPacer {
   }
 }
 
+/// Raised when an artwork search or download fails. [message] is safe to
+/// show to the user.
 class ArtworkLookupException implements Exception {
   const ArtworkLookupException(this.message);
   final String message;

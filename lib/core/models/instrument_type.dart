@@ -1,3 +1,4 @@
+/// Instrument a tab is written for.
 enum InstrumentType {
   guitar,
   bass,
@@ -9,10 +10,12 @@ enum InstrumentType {
     other => 'Other',
   };
 
+  /// Parses a stored name; unknown values become [other].
   static InstrumentType fromJson(String value) => InstrumentType.values
       .firstWhere((type) => type.name == value, orElse: () => other);
 }
 
+/// Kind of tablature, used for filtering and display.
 enum TabType {
   tab,
   bass,

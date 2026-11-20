@@ -7,9 +7,15 @@ import '../screens/practice_screen.dart';
 import '../screens/settings_screen.dart';
 import '../screens/tuner_screen.dart';
 
+/// The app shell: a bottom navigation bar over the five top-level screens.
+///
+/// Screens are kept alive in an [IndexedStack], so switching tabs keeps
+/// scroll position and in-progress work. The selected tab is restored after
+/// the OS kills and restores the app.
 class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key, this.tunerInputFactory});
 
+  /// Overrides the tuner's microphone, used by tests to inject fake audio.
   final TunerAudioInput Function()? tunerInputFactory;
 
   @override
