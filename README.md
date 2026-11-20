@@ -2,7 +2,7 @@
 
 RiffShelf is a Flutter application for discovering, organizing, and practicing guitar and bass tablature on Android and iOS. Its navigation includes Discover, Practice, Tuner, Library, and Settings.
 
-The bottom navigation keeps screens mounted while switching tabs and restores the selected tab when the app is restored. Screen functionality will be added in later milestones.
+The bottom navigation keeps screens mounted while switching tabs and restores the selected tab when the app is restored.
 
 The app uses a dark, near-black theme with teal accents and outlined surfaces, inspired by the tab-practice visual reference.
 
@@ -10,9 +10,14 @@ The app uses a dark, near-black theme with teal accents and outlined surfaces, i
 
 - `lib/main.dart` starts the app; `lib/app.dart` configures the app theme and root.
 - `lib/navigation/` contains the persistent bottom-navigation shell.
-- `lib/screens/` contains the individual tab screens.
+- `lib/screens/` contains the top-level tab screens (Discover, Library, Practice, Tuner, Settings).
+- `lib/core/` holds shared domain models (`models/`), SQLite repositories (`database/`), and the theme provider.
+- `lib/features/` groups feature code: `search/` (domain, data, application layers), `import/`, `tabs/` (viewer and practice), `tuner/`, `artwork/`, and `library/`.
 - `lib/widgets/` contains UI shared across screens.
-- Add `lib/services/` or `lib/models/` when those layers are introduced by later features.
+- `test/` contains unit and widget tests; `integration_test/` contains on-device tests.
+- `server/` is the optional FastAPI search and metadata backend.
+
+See [docs/architecture.md](docs/architecture.md) for how these layers fit together.
 
 ## Requirements
 
