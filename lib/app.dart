@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import 'core/theme_provider.dart';
 import 'navigation/main_navigation.dart';
 
+/// Root widget. Applies the current [ThemeProvider] theme and enables state
+/// restoration for the navigation shell.
 class RiffShelfApp extends StatelessWidget {
   const RiffShelfApp({super.key});
 
