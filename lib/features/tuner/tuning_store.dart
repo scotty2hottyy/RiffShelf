@@ -5,7 +5,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/models/tuning.dart';
 import 'pitch_detector.dart';
 
-/// The microphone detector supports approximately A0 through B5.
+/// Returns a user-facing error for an invalid custom tuning, or null if it
+/// is valid. Notes are limited to A0 through B5, the range the microphone
+/// detector supports reliably.
 String? tuningValidationError(
   String name,
   TunerInstrument instrument,
@@ -34,6 +36,7 @@ String? tuningValidationError(
   return null;
 }
 
+/// A tuning the user created, with a stable [id] for selection.
 class CustomTuning {
   const CustomTuning({required this.id, required this.preset});
 
@@ -47,6 +50,7 @@ class CustomTuning {
     'notes': preset.notes,
   };
 
+  /// Parses a stored tuning, returning null for malformed data.
   static CustomTuning? fromJson(Object? value) {
     if (value is! Map<String, dynamic>) return null;
     final id = value['id'];
@@ -77,6 +81,7 @@ class CustomTuning {
   }
 }
 
+/// Saved tuner state: custom tunings and the selected preset id.
 class TunerSettings {
   const TunerSettings({this.customTunings = const [], this.selectedId});
 
@@ -88,6 +93,8 @@ class TunerSettings {
     'selectedId': selectedId,
   };
 
+  /// Parses stored settings. Corrupt data resets to defaults instead of
+  /// throwing.
   static TunerSettings fromJson(String raw) {
     try {
       final value = jsonDecode(raw);
@@ -109,11 +116,13 @@ class TunerSettings {
   }
 }
 
+/// Persistence for [TunerSettings], replaceable with a fake in tests.
 abstract interface class TunerSettingsStore {
   Future<TunerSettings> load();
   Future<void> save(TunerSettings settings);
 }
 
+/// Stores [TunerSettings] as JSON in shared preferences under [key].
 class LocalTunerSettingsStore implements TunerSettingsStore {
   LocalTunerSettingsStore({SharedPreferencesAsync? preferences})
     : _preferences = preferences ?? SharedPreferencesAsync();
