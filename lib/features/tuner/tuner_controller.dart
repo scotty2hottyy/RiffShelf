@@ -6,6 +6,7 @@ import '../../core/models/tuning.dart';
 import 'audio_input.dart';
 import 'pitch_detector.dart';
 
+/// Microphone and listening state shown by the tuner screen.
 enum TunerStatus {
   idle,
   starting,
@@ -15,6 +16,7 @@ enum TunerStatus {
   error,
 }
 
+/// One stable pitch reading, relative to the string being tuned.
 @immutable
 class TunerReading {
   const TunerReading({
@@ -35,9 +37,16 @@ class TunerReading {
   /// Cents offset from [targetNote]; positive means sharp.
   final double targetCents;
 
+  /// Whether the string is within 5 cents of [targetNote].
   bool get inTune => targetCents.abs() <= 5;
 }
 
+/// Turns microphone audio into [TunerReading]s for the tuner screen.
+///
+/// Audio from [TunerAudioInput] is analyzed every 80 ms with a
+/// [PitchDetector]. Low-confidence and unstable readings are dropped so
+/// the needle does not jump. Practice mode reuses this controller with
+/// [onPitch] to receive raw detector observations instead.
 class TunerController extends ChangeNotifier {
   TunerController({
     required TunerAudioInput input,
@@ -96,6 +105,8 @@ class TunerController extends ChangeNotifier {
   int? get selectedStringIndex => _selectedStringIndex;
   bool get isListening => _status == TunerStatus.listening;
 
+  /// Locks tuning to one string of the preset, or pass null for
+  /// automatic string detection.
   void selectString(int? index) {
     if (index != null && (index < 0 || index >= _preset.notes.length)) {
       throw RangeError.index(index, _preset.notes);
@@ -107,6 +118,7 @@ class TunerController extends ChangeNotifier {
     _notify();
   }
 
+  /// Changes the tuning and returns to automatic string detection.
   set preset(TuningPreset value) {
     if (identical(value, _preset)) return;
     _preset = value;
@@ -116,6 +128,8 @@ class TunerController extends ChangeNotifier {
     _notify();
   }
 
+  /// Requests the microphone and starts listening. Failures are reported
+  /// through [status] rather than thrown.
   Future<void> start() {
     if (_disposed ||
         _status == TunerStatus.starting ||
@@ -180,6 +194,7 @@ class TunerController extends ChangeNotifier {
     });
   }
 
+  /// Stops listening and releases the microphone.
   Future<void> stop() {
     if (_disposed) return Future<void>.value();
     final session = ++_session;
