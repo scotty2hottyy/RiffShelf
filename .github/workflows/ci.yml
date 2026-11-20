@@ -112,6 +112,7 @@ jobs:
   ios-simulator:
     if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
+    timeout-minutes: 60
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -128,3 +129,28 @@ jobs:
 
       - name: Build iOS simulator app
         run: flutter build ios --simulator --debug
+
+      - name: Boot iOS simulator
+        id: simulator
+        run: |
+          UDID=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          print(next(
+              device["udid"]
+              for runtime, entries in sorted(devices.items(), reverse=True)
+              if "iOS" in runtime
+              for device in entries
+              if device["name"].startswith("iPhone")
+          ))
+          ')
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Run integration tests on iOS simulator
+        env:
+          DEVICE_ID: ${{ steps.simulator.outputs.udid }}
+        run: |
+          flutter test integration_test/app_smoke_test.dart -d "$DEVICE_ID"
+          flutter test integration_test/storage_on_device_test.dart -d "$DEVICE_ID"
