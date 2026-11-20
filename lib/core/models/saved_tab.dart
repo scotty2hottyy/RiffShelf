@@ -6,6 +6,10 @@ import 'instrument_type.dart';
 import 'tab_structure.dart';
 import 'tuning.dart';
 
+/// A tab in the user's library.
+///
+/// A tab can hold structured [measures] (from Guitar Pro or Songsterr),
+/// plain [asciiTab] text, or both. It must have at least one to be saved.
 @immutable
 class SavedTab {
   const SavedTab({
@@ -34,9 +38,11 @@ class SavedTab {
   }) : assert(stringCount > 0),
        assert(capo >= 0);
 
+  /// Database id, or null before the tab is first saved.
   final int? id;
   final String title;
   final String artist;
+  /// Where the tab came from, such as `Songsterr` or `Text import`.
   final String source;
   final String sourceUrl;
   final String? sourceId;
@@ -47,12 +53,16 @@ class SavedTab {
   final String? trackName;
   final InstrumentType instrument;
   final int stringCount;
+  /// Open-string pitches from lowest to highest, such as `E2`.
   final List<String> tuning;
   final int capo;
+
+  /// Authored tempo, or null when unknown.
   final int? bpm;
   final List<String> tags;
   final String asciiTab;
   final List<TabMeasure> measures;
+  /// Provider-specific JSON used to re-download the same track.
   final String? sourceData;
   final InstrumentClassification classification;
   final bool isFavorite;
@@ -70,6 +80,7 @@ class SavedTab {
             measure.beats.any((beat) => beat.isRest || beat.notes.isNotEmpty),
       );
   bool get hasTextContent => asciiTab.trim().isNotEmpty;
+  /// Whether the tab has anything to display or practice.
   bool get hasUsableContent => hasStructuredContent || hasTextContent;
 
   SavedTab copyWith({
