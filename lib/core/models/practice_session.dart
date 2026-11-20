@@ -1,3 +1,7 @@
+/// One saved practice session for a tab, stored only on this device.
+///
+/// [hits], [misses], and [accuracy] are only set by timed scoring; they
+/// are null for scrolling and note-by-note sessions.
 class PracticeSession {
   const PracticeSession({
     required this.title,
@@ -16,10 +20,19 @@ class PracticeSession {
   final String title;
   final String artist;
   final DateTime savedAt;
+  /// Time spent with playback or note following active.
   final int durationMilliseconds;
+
+  /// First and last measure of the selected section, or null when the tab
+  /// has no measures.
   final int? startMeasure;
   final int? endMeasure;
+
+  /// Set by the user; the app never infers completion.
   final bool markedComplete;
+
+  /// Notes confirmed in note-by-note mode, including repeats. For timed
+  /// sessions this is the number of hits.
   final int confirmedNotes;
   final int? hits;
   final int? misses;
@@ -55,6 +68,7 @@ class PracticeSession {
       );
 }
 
+/// All-time totals shown on the practice history screen.
 class PracticeHistorySummary {
   PracticeHistorySummary(Iterable<PracticeSession> sessions)
     : sessions = sessions.length,
@@ -78,6 +92,7 @@ class PracticeHistorySummary {
   final int totalMisses;
   final int timedSessions;
 
+  /// Percentage of timed notes hit, or null if nothing was scored.
   double? get averageAccuracy {
     final total = totalHits + totalMisses;
     if (total == 0) return null;
