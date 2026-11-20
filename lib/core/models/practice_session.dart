@@ -20,6 +20,7 @@ class PracticeSession {
   final String title;
   final String artist;
   final DateTime savedAt;
+
   /// Time spent with playback or note following active.
   final int durationMilliseconds;
 

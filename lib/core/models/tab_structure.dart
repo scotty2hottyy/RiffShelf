@@ -11,6 +11,7 @@ class TabNote {
     this.technique,
   }) : assert(stringNumber > 0),
        assert(fret >= 0);
+
   /// 1-based string number; string 1 is the highest-pitched string.
   final int stringNumber;
   final int fret;
@@ -20,6 +21,7 @@ class TabNote {
 
   /// Duration in quarter-note beats.
   final double? duration;
+
   /// Source technique such as a bend or slide, if any.
   final String? technique;
 
@@ -85,6 +87,7 @@ class TabMeasure {
     this.denominator = 4,
     this.beats = const [],
   });
+
   /// 1-based measure number as shown to the user.
   final int number;
 

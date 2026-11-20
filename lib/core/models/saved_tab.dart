@@ -42,6 +42,7 @@ class SavedTab {
   final int? id;
   final String title;
   final String artist;
+
   /// Where the tab came from, such as `Songsterr` or `Text import`.
   final String source;
   final String sourceUrl;
@@ -53,6 +54,7 @@ class SavedTab {
   final String? trackName;
   final InstrumentType instrument;
   final int stringCount;
+
   /// Open-string pitches from lowest to highest, such as `E2`.
   final List<String> tuning;
   final int capo;
@@ -62,6 +64,7 @@ class SavedTab {
   final List<String> tags;
   final String asciiTab;
   final List<TabMeasure> measures;
+
   /// Provider-specific JSON used to re-download the same track.
   final String? sourceData;
   final InstrumentClassification classification;
@@ -80,6 +83,7 @@ class SavedTab {
             measure.beats.any((beat) => beat.isRest || beat.notes.isNotEmpty),
       );
   bool get hasTextContent => asciiTab.trim().isNotEmpty;
+
   /// Whether the tab has anything to display or practice.
   bool get hasUsableContent => hasStructuredContent || hasTextContent;
 
