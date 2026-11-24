@@ -6,6 +6,7 @@ import '../../core/models/instrument_type.dart';
 import '../../core/models/saved_tab.dart';
 import '../../core/models/tab_structure.dart';
 
+/// Summary of one track, shown when the user picks which track to import.
 class GuitarProTrackInfo {
   const GuitarProTrackInfo({
     required this.index,
@@ -17,6 +18,7 @@ class GuitarProTrackInfo {
   final int stringCount;
 }
 
+/// A parsed Guitar Pro file, kept so any of its tracks can be converted.
 class GuitarProDocument {
   const GuitarProDocument(this.song);
   final gp.Song song;
@@ -31,12 +33,21 @@ class GuitarProDocument {
   ];
 }
 
+/// Reads Guitar Pro files with `dart_gp_tab_reader` and converts tracks to
+/// [SavedTab]s.
+///
+/// Use `TabImportService` from app code; it wraps these calls with
+/// validation and user-friendly errors.
 class GuitarProImporter {
   const GuitarProImporter();
 
+  /// Parses GP3, GP4, GP5, or GPX bytes. Throws on unreadable files.
   GuitarProDocument parse(Uint8List bytes) =>
       GuitarProDocument(gp.parseGp(bytes));
 
+  /// Converts one track into a tab with structured measures. Durations and
+  /// positions are converted to quarter-note beats, and tuning is listed
+  /// from lowest to highest string.
   SavedTab convert(
     GuitarProDocument document, {
     required int trackIndex,

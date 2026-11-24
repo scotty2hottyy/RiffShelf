@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+/// A detected fundamental frequency in Hz with a 0 to 1 [confidence].
 @immutable
 class PitchResult {
   const PitchResult(this.frequency, this.confidence);
@@ -9,6 +10,7 @@ class PitchResult {
   final double confidence;
 }
 
+/// The nearest equal-tempered note to a frequency, such as `E2 -3 cents`.
 @immutable
 class NoteMatch {
   const NoteMatch({
@@ -39,14 +41,18 @@ const _noteNames = [
   'B',
 ];
 
+/// Default concert pitch for note and frequency conversions.
 const double referenceA4 = 440;
 
+/// Converts a frequency in Hz to a fractional MIDI note number.
 double midiFromFrequency(double frequency, {double a4 = referenceA4}) =>
     69 + 12 * (math.log(frequency / a4) / math.ln2);
 
+/// Converts a MIDI note number to its frequency in Hz.
 double frequencyFromMidi(int midi, {double a4 = referenceA4}) =>
     a4 * math.pow(2, (midi - 69) / 12);
 
+/// Returns the closest note to [frequency] and how far off it is in cents.
 NoteMatch nearestNote(double frequency, {double a4 = referenceA4}) {
   final midiExact = midiFromFrequency(frequency, a4: a4);
   final midi = midiExact.round();
@@ -86,14 +92,22 @@ class PitchDetector {
   });
 
   final int sampleRate;
+
+  /// Lowest and highest pitches searched for, in Hz.
   final double minFrequency;
   final double maxFrequency;
+
+  /// YIN cutoff for accepting a period. Lower values are stricter.
   final double threshold;
+
+  /// Inputs quieter than this root-mean-square level are ignored.
   final double minRms;
 
   /// Samples needed for a reliable estimate of the lowest supported pitch.
   int get windowSize => (sampleRate / minFrequency).ceil() * 2 + 2;
 
+  /// Estimates the pitch of [samples], or returns null when the input is
+  /// too quiet (below [minRms]), too short, or has no clear period.
   PitchResult? detect(Float64List samples) {
     final tauMax = (sampleRate / minFrequency).ceil();
     final tauMin = math.max(2, (sampleRate / maxFrequency).floor());

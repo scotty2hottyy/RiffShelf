@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+/// One fretted note. Stored as JSON inside [SavedTab]'s structure column.
 @immutable
 class TabNote {
   const TabNote({
@@ -10,12 +11,18 @@ class TabNote {
     this.technique,
   }) : assert(stringNumber > 0),
        assert(fret >= 0);
+
+  /// 1-based string number; string 1 is the highest-pitched string.
   final int stringNumber;
   final int fret;
+
+  /// Pitch from the source file, if known. Not adjusted for capo.
   final int? midiPitch;
 
   /// Duration in quarter-note beats.
   final double? duration;
+
+  /// Source technique such as a bend or slide, if any.
   final String? technique;
 
   Map<String, Object?> toJson() => {
@@ -35,6 +42,8 @@ class TabNote {
   );
 }
 
+/// Notes played together at one position in a measure. A beat with no
+/// notes and [isRest] set is a rest.
 @immutable
 class TabBeat {
   const TabBeat({
@@ -69,6 +78,7 @@ class TabBeat {
   );
 }
 
+/// A measure with its time signature and beats.
 @immutable
 class TabMeasure {
   const TabMeasure({
@@ -77,7 +87,11 @@ class TabMeasure {
     this.denominator = 4,
     this.beats = const [],
   });
+
+  /// 1-based measure number as shown to the user.
   final int number;
+
+  /// Time signature, such as 3/4.
   final int numerator;
   final int denominator;
   final List<TabBeat> beats;

@@ -7,12 +7,19 @@ import '../../core/models/saved_tab.dart';
 import 'ascii_tab_parser.dart';
 import 'guitar_pro_importer.dart';
 
+/// Turns files picked from the device into [SavedTab]s.
+///
+/// Supports Guitar Pro (GP3, GP4, GP5, GPX) and UTF-8 text tabs. Every
+/// failure is reported as a [FormatException] with a message that can be
+/// shown to the user.
 class TabImportService {
   const TabImportService();
 
+  /// Stable key for one track of one file, used to detect duplicate imports.
   String importKey(Uint8List bytes, int trackIndex) =>
       'sha256:${sha256.convert(bytes)}:track:$trackIndex';
 
+  /// Whether files with [extension] can be imported. Case-insensitive.
   bool supportsExtension(String? extension) => const [
     'txt',
     'gp3',
@@ -21,6 +28,7 @@ class TabImportService {
     'gpx',
   ].contains(extension?.toLowerCase());
 
+  /// Parses a Guitar Pro file so the user can choose a track.
   GuitarProDocument parseGuitarPro(Uint8List bytes) {
     try {
       final document = const GuitarProImporter().parse(bytes);
@@ -35,6 +43,8 @@ class TabImportService {
     }
   }
 
+  /// Converts track [index] of [document] into a tab. Rejects drum tracks
+  /// and tracks without fretted notes.
   SavedTab convertTrack(GuitarProDocument document, int index, String name) {
     try {
       if (document.song.tracks[index].isPercussionTrack ||
@@ -61,6 +71,8 @@ class TabImportService {
     }
   }
 
+  /// Parses a plain-text ASCII tab, inferring instrument, string count,
+  /// and tuning. Chord-only sheets are rejected.
   SavedTab parseText(Uint8List bytes, String name) {
     final String content;
     try {

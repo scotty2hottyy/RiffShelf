@@ -10,11 +10,20 @@ import '../models/tuning.dart';
 import 'sqlite_practice_session_repository.dart';
 import 'tab_repository.dart';
 
+/// SQLite-backed [TabRepository] stored in `riffshelf.db`.
+///
+/// The database also holds the practice history table, which
+/// [SqlitePracticeSessionRepository] reads through [database]. Schema
+/// changes must bump the open version and add a step to `onUpgrade` so
+/// existing installs migrate instead of losing data.
 class SqliteTabRepository implements TabRepository, AutomaticArtworkRepository {
   SqliteTabRepository(this._databaseFactory, [this._databasePath]);
 
+  /// Incremented when a tab is inserted or automatic artwork is set, so
+  /// screens listening to it can reload.
   static final ValueNotifier<int> changes = ValueNotifier(0);
 
+  /// Opens the default on-device database.
   factory SqliteTabRepository.local() => SqliteTabRepository(databaseFactory);
 
   final DatabaseFactory _databaseFactory;
